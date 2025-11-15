@@ -21,7 +21,7 @@ This repository contains scripts for automating Proxmox VM management tasks:
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/your-username/cpcg-proxmox-scripts.git
+   git clone https://github.com/chrsandb/cpcg-proxmox-scripts.git
    cd cpcg-proxmox-scripts
    ```
 
