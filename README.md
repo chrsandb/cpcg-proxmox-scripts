@@ -82,6 +82,8 @@ Removes virtual machines and their associated Cloud-Init ISOs.
 
 ## Usage
 
+All scripts load defaults from `.env` and allow CLI flags to override them.
+
 ### Template Creation Scripts
 
 #### Gateway Template
@@ -95,16 +97,16 @@ Removes virtual machines and their associated Cloud-Init ISOs.
 ```
 
 **Common Options**:
-- `--host <IP>`: Proxmox server IP (default: 10.17.1.12)
-- `--user <username>`: API username (default: root@pam)
-- `--password <password>`: API password (required)
-- `--node <node>`: Proxmox node name (default: pve02)
-- `--storage <storage>`: Storage name (default: vm_data)
-- `--template-id <id>`: VM ID for template (default: 9600/9500)
-- `--template-name <name>`: Template name
-- `--cores <count>`: CPU cores (default: 8)
-- `--memory <MB>`: Memory in MB (default: 8192/16384)
-- `--qcow2_image <path>`: Path to QCOW2 image
+- `--host <IP>`: Proxmox server IP (default: from `.env`)
+- `--user <username>`: API username (default: from `.env`)
+- `--password <password>`: API password (required for password auth)
+- `--node <node>`: Proxmox node name (default: from `.env`)
+- `--storage <storage>`: Storage name (default: from `.env` `STORAGE_NAME_DISK`)
+- `--template-id <id>`: VM ID for template (default: from `.env`)
+- `--template-name <name>`: Template name (default: from `.env`)
+- `--cores <count>`: CPU cores (default: from `.env`)
+- `--memory <MB>`: Memory in MB (default: from `.env`)
+- `--qcow2_image <path>`: Path to QCOW2 image (default: from `.env`)
 - `--copy-image`: Transfer image to Proxmox server
 - `--debug`: Enable debug output
 
@@ -115,23 +117,16 @@ Removes virtual machines and their associated Cloud-Init ISOs.
 ```
 
 **Options**:
-- `--host <IP>`: Proxmox server IP (default: 10.17.1.12)
-- `--user <username>`: API username (default: root@pam)
-- `--password <password>`: API password (required)
-- `--node <node>`: Proxmox node name (default: pve02)
-- `--storage <storage>`: Storage name (default: vm_data)
-- `--template-id <id>`: Source template ID (required)
-- `--vm-id <id>`: New VM ID (required)
-- `--vm-name <name>`: VM name (required)
-- `--cores <count>`: CPU cores (default: 4)
-- `--memory <MB>`: Memory in MB (default: 4096)
-- `--disk-size <GB>`: Disk size in GB (default: 32)
-- `--hostname <name>`: VM hostname
-- `--ip-address <IP>`: IP address for eth0
-- `--gateway <IP>`: Default gateway
-- `--dns <IP>`: DNS server
-- `--ssh-key <key>`: SSH public key
-- `--user-data <file>`: Path to user-data file
+- `--host <IP>`: Proxmox server IP (default: from `.env`)
+- `--user <username>`: API username (default: from `.env`)
+- `--password <password>`: API password (required for password auth)
+- `--node <node>`: Proxmox node name (default: from `.env`)
+- `--storage <storage>`: Storage name for ISO upload (default: from `.env` `STORAGE_NAME_ISO`)
+- `--template <id>`: Source template ID (default: from `.env`)
+- `--resize <value>`: Disk resize value (default: from `.env`)
+- `--name <name>`: VM name (default: from `.env`)
+- `--start-id <id>`: Start searching for VM IDs from this value (default: from `.env`)
+- `--user-data <file>`: Path to Cloud-Init user-data file (default: from `.env`)
 - `--debug`: Enable debug output
 
 ### VM Deletion
@@ -141,10 +136,11 @@ Removes virtual machines and their associated Cloud-Init ISOs.
 ```
 
 **Options**:
-- `--host <IP>`: Proxmox server IP (default: 10.17.1.12)
-- `--user <username>`: API username (default: root@pam)
-- `--password <password>`: API password (required)
-- `--node <node>`: Proxmox node name (default: pve02)
+- `--host <IP>`: Proxmox server IP (default: from `.env`)
+- `--user <username>`: API username (default: from `.env`)
+- `--password <password>`: API password (required for password auth)
+- `--node <node>`: Proxmox node name (default: from `.env`)
+- `--storage <storage>`: Storage name for ISO upload (default: from `.env` `STORAGE_NAME_ISO`)
 - `--vm-id <id>`: VM ID to delete (required)
 - `--debug`: Enable debug output
 
@@ -154,7 +150,7 @@ Removes virtual machines and their associated Cloud-Init ISOs.
 ```bash
 ./create_cpgw_template.sh \
   --password "secure-password" \
-  --host "10.17.1.12" \
+  --host "192.168.1.12" \
   --template-name "cp-gateway-template" \
   --qcow2_image "/path/to/gateway.qcow2" \
   --copy-image \
@@ -167,7 +163,7 @@ Removes virtual machines and their associated Cloud-Init ISOs.
 ```bash
 ./create_cpmngt_template.sh \
   --password "secure-password" \
-  --host "10.17.1.12" \
+  --host "192.168.1.12" \
   --template-name "cp-mgmt-template" \
   --qcow2_image "/path/to/management.qcow2" \
   --copy-image \
@@ -179,14 +175,10 @@ Removes virtual machines and their associated Cloud-Init ISOs.
 ```bash
 ./create_cpvm_with_cloudinit_iso_from_template.sh \
   --password "secure-password" \
-  --template-id 9600 \
-  --vm-id 100 \
-  --vm-name "gateway-01" \
-  --hostname "gateway-01.example.com" \
-  --ip-address "192.168.1.100/24" \
-  --gateway "192.168.1.1" \
-  --dns "8.8.8.8" \
-  --ssh-key "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ..."
+  --template 9600 \
+  --name "gateway-01" \
+  --start-id 100 \
+  --user-data "/path/to/user_data"
 ```
 
 ### Delete VM
@@ -198,16 +190,53 @@ Removes virtual machines and their associated Cloud-Init ISOs.
 
 ## Configuration
 
-### Environment Variables
+### .env Configuration
 
-You can set default values using environment variables:
+Copy `.env.template` to `.env` and fill in values:
 
 ```bash
-export PVE_HOST="10.17.1.12"
-export PVE_USER="root@pam"
-export PVE_PASSWORD="your-password"
-export NODE_NAME="pve02"
-export STORAGE_NAME="vm_data"
+cp .env.template .env
+```
+
+### Authentication
+
+You can authenticate with either username/password (default) or an API token.
+
+- Password auth: set `PVE_AUTH_MODE="password"` and `PVE_PASSWORD`.
+- Token auth: set `PVE_AUTH_MODE="token"` plus `PVE_TOKEN_ID` and `PVE_TOKEN_SECRET`.
+- If `PVE_AUTH_MODE` is empty, token auth is used when both token values are present; otherwise password auth is used.
+
+`PVE_TOKEN_ID` can be either the token name (e.g., `mytoken`) or the full token ID (e.g., `root@pam!mytoken`).
+API token authentication has not been tested in this repository yet.
+
+Suggested Proxmox defaults if you are using a single-node install:
+- `NODE_NAME="pve"` (the node name shown in the Proxmox UI)
+- `STORAGE_NAME_ISO="local"` for ISO uploads
+- `STORAGE_NAME_DISK="local-lvm"` for VM disks
+
+### Template ID Relationships
+
+These IDs are related but serve different roles:
+
+- `CPMNGT_TEMPLATE_ID` and `CPGW_TEMPLATE_ID` are the template VM IDs created by `create_cpmngt_template.sh` and `create_cpgw_template.sh`.
+- `CPVM_TEMPLATE_VM_ID` is the source template ID that `create_cpvm_with_cloudinit_iso_from_template.sh` clones from.
+
+If you want to deploy VMs from the template you just created, set `CPVM_TEMPLATE_VM_ID` to match either `CPMNGT_TEMPLATE_ID` or `CPGW_TEMPLATE_ID`.
+
+### Environment Variables
+
+Defaults are loaded from `.env`:
+
+```bash
+PVE_HOST="192.168.1.12"
+PVE_USER="root@pam"
+PVE_PASSWORD="your-password"
+PVE_AUTH_MODE="password"
+PVE_TOKEN_ID="mytoken"
+PVE_TOKEN_SECRET="your-token-secret"
+NODE_NAME="pve"
+STORAGE_NAME_DISK="local-lvm"
+STORAGE_NAME_ISO="local"
 ```
 
 ### Cloud-Init Configuration
@@ -238,6 +267,7 @@ For VM deployment, you can provide custom Cloud-Init configuration:
    - Verify QCOW2 file exists and is readable
    - Check storage permissions
    - Ensure sufficient storage space
+   - Import tasks now fail fast; verify `CPMNGT_IMAGE_PATH` or `CPGW_IMAGE_PATH` points to a valid file on the Proxmox host
 
 3. **VM Creation Failed**
    - Verify template exists

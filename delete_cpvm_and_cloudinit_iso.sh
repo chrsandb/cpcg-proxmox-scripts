@@ -1,17 +1,22 @@
 #!/bin/bash
 
-# Default Variables
-PVE_HOST="10.17.1.6"
-PVE_USER="root@pam"
-PVE_PASSWORD=""
-NODE_NAME="pve"
-STORAGE_NAME="local"
-PROXMOX_PORT="8006"
-PROXMOX_API_URL=""
-DEBUG_MODE=false
+# Load configuration from .env
+load_env() {
+    local env_file=".env"
+    if [[ ! -f "$env_file" ]]; then
+        echo "Error: $env_file not found. Copy .env.template to .env and update values."
+        exit 1
+    fi
+    # shellcheck disable=SC1091
+    source "$env_file"
+}
 
+load_env
+
+PROXMOX_API_URL=""
 CSRF_TOKEN=""
 PVE_AUTH_COOKIE=""
+AUTH_HEADER_ARGS=()
 VM_ID=""
 
 # Function to print the help text
@@ -19,11 +24,11 @@ print_help() {
   echo "Usage: $0 [OPTIONS]"
   echo ""
   echo "Options:"
-  echo "  --host <Proxmox Host>          Proxmox server IP or hostname (default: 10.17.1.6)"
+  echo "  --host <Proxmox Host>          Proxmox server IP or hostname (default: 192.168.1.6)"
   echo "  --user <Username>              Proxmox API username (default: root@pam)"
-  echo "  --password <Password>          Proxmox API password (required)"
+  echo "  --password <Password>          Proxmox API password (required for password auth)"
   echo "  --node <Node Name>             Proxmox node name (default: pve)"
-  echo "  --storage <Storage Name>       Proxmox storage name for ISO upload (default: local)"
+  echo "  --storage <Storage Name>       Proxmox storage name for ISO upload (default: from .env STORAGE_NAME_ISO)"
   echo "  --vm-id <VM ID>                ID of the VM to delete (required)"
   echo "  --debug                        Print API responses for debugging to STDERR"
   echo "  -h, --help                     Show this help message"
@@ -37,7 +42,7 @@ parse_arguments() {
       --user) PVE_USER="$2"; shift; shift ;;
       --password) PVE_PASSWORD="$2"; shift; shift ;;
       --node) NODE_NAME="$2"; shift; shift ;;
-      --storage) STORAGE_NAME="$2"; shift; shift ;;
+      --storage) STORAGE_NAME_ISO="$2"; shift; shift ;;
       --vm-id) VM_ID="$2"; shift; shift ;;
       --debug) DEBUG_MODE=true; shift ;;
       -h|--help) print_help; exit 0 ;;
@@ -48,8 +53,8 @@ parse_arguments() {
 
 # Validate required arguments
 validate_arguments() {
-  if [[ -z "$PVE_HOST" || -z "$PVE_USER" || -z "$PVE_PASSWORD" || -z "$NODE_NAME" || -z "$STORAGE_NAME" || -z "$VM_ID" ]]; then
-    echo "Error: Missing one or more required arguments (--host, --user, --password, --node, --storage, --vm-id)."
+  if [[ -z "$PVE_HOST" || -z "$PVE_USER" || -z "$NODE_NAME" || -z "$STORAGE_NAME_ISO" || -z "$VM_ID" ]]; then
+    echo "Error: Missing one or more required arguments (--host, --user, --node, --storage, --vm-id)."
     print_help
     exit 1
   fi
@@ -86,6 +91,37 @@ authenticate() {
   echo "Authentication successful."
 }
 
+# Initialize auth headers for token or password auth
+init_auth() {
+  local auth_mode="$PVE_AUTH_MODE"
+  if [[ -z "$auth_mode" ]]; then
+    if [[ -n "$PVE_TOKEN_ID" && -n "$PVE_TOKEN_SECRET" ]]; then
+      auth_mode="token"
+    else
+      auth_mode="password"
+    fi
+  fi
+
+  if [[ "$auth_mode" == "token" ]]; then
+    if [[ -z "$PVE_USER" || -z "$PVE_TOKEN_ID" || -z "$PVE_TOKEN_SECRET" ]]; then
+      echo "Error: Token auth requires PVE_USER, PVE_TOKEN_ID, and PVE_TOKEN_SECRET."
+      exit 1
+    fi
+    local token_id_full="$PVE_TOKEN_ID"
+    if [[ "$token_id_full" != *"!"* ]]; then
+      token_id_full="${PVE_USER}!${PVE_TOKEN_ID}"
+    fi
+    AUTH_HEADER_ARGS=(-H "Authorization: PVEAPIToken=${token_id_full}=${PVE_TOKEN_SECRET}")
+  else
+    if [[ -z "$PVE_PASSWORD" ]]; then
+      echo "Error: Password auth requires PVE_PASSWORD."
+      exit 1
+    fi
+    authenticate
+    AUTH_HEADER_ARGS=(-H "CSRFPreventionToken: $CSRF_TOKEN" -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE")
+  fi
+}
+
 # Function to debug API responses
 debug_response() {
   local response="$1"
@@ -99,8 +135,7 @@ debug_response() {
 check_vm_exists() {
   echo "Checking if VM $VM_ID exists..."
   local response=$(curl -s -k -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/current" \
-    -H "CSRFPreventionToken: $CSRF_TOKEN" \
-    -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE")
+    "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
 
@@ -116,8 +151,7 @@ check_vm_exists() {
 get_vm_name() {
   echo "Retrieving name for VM $VM_ID..."
   local response=$(curl -s -k -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/config" \
-    -H "CSRFPreventionToken: $CSRF_TOKEN" \
-    -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE")
+    "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
 
@@ -135,8 +169,7 @@ get_vm_name() {
 stop_vm() {
   echo "Stopping VM $VM_ID..."
   local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/stop" \
-    -H "CSRFPreventionToken: $CSRF_TOKEN" \
-    -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE")
+    "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
 
@@ -150,8 +183,7 @@ stop_vm() {
   echo "Waiting for VM $VM_ID to stop..."
   while true; do
     local status_response=$(curl -s -k -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/current" \
-      -H "CSRFPreventionToken: $CSRF_TOKEN" \
-      -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE")
+      "${AUTH_HEADER_ARGS[@]}")
     local vm_status=$(echo "$status_response" | jq -r '.data.status')
 
     if [[ "$vm_status" == "stopped" ]]; then
@@ -167,8 +199,7 @@ stop_vm() {
 delete_vm() {
   echo "Deleting VM $VM_ID..."
   local response=$(curl -s -k -X DELETE "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID" \
-    -H "CSRFPreventionToken: $CSRF_TOKEN" \
-    -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE")
+    "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
 
@@ -185,10 +216,9 @@ delete_vm() {
 # Function to delete the associated ISO
 delete_iso() {
   local iso_filename="CI_${VM_ID}_${VM_NAME}.iso"
-  echo "Deleting ISO $iso_filename from storage $STORAGE_NAME..."
-  local response=$(curl -s -k -X DELETE "$PROXMOX_API_URL/nodes/$NODE_NAME/storage/$STORAGE_NAME/content/$STORAGE_NAME:iso/$iso_filename" \
-    -H "CSRFPreventionToken: $CSRF_TOKEN" \
-    -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE")
+  echo "Deleting ISO $iso_filename from storage $STORAGE_NAME_ISO..."
+  local response=$(curl -s -k -X DELETE "$PROXMOX_API_URL/nodes/$NODE_NAME/storage/$STORAGE_NAME_ISO/content/$STORAGE_NAME_ISO:iso/$iso_filename" \
+    "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
 
@@ -206,7 +236,7 @@ delete_iso() {
 main() {
   parse_arguments "$@"
   validate_arguments
-  authenticate
+  init_auth
   check_vm_exists
   get_vm_name
   stop_vm

@@ -1,24 +1,22 @@
 #!/bin/bash
 
-# Default Variables
-PVE_HOST="10.17.1.12"
-PVE_USER="root@pam"
-PVE_PASSWORD=""
-NODE_NAME="pve02"
-STORAGE_NAME="media"
-TEMPLATE_VM_ID=9500
-DISK_RESIZE="+80G"
-VM_NAME="mynewvm"
-VM_ID_START=501
-TEMP_ISO_DIR="/tmp/iso"
-TEMP_FS_DIR="/tmp/fs"
-USER_DATA_FILE=""
-PROXMOX_PORT="8006"
-PROXMOX_API_URL=""
-DEBUG_MODE=false
+# Load configuration from .env
+load_env() {
+    local env_file=".env"
+    if [[ ! -f "$env_file" ]]; then
+        echo "Error: $env_file not found. Copy .env.template to .env and update values."
+        exit 1
+    fi
+    # shellcheck disable=SC1091
+    source "$env_file"
+}
 
+load_env
+
+PROXMOX_API_URL=""
 CSRF_TOKEN=""
 PVE_AUTH_COOKIE=""
+AUTH_HEADER_ARGS=()
 VM_ID=""
 
 # Function to print the help text
@@ -26,16 +24,16 @@ print_help() {
   echo "Usage: $0 [OPTIONS]"
   echo ""
   echo "Options:"
-  echo "  --host <Proxmox Host>          Proxmox server IP or hostname (default: 10.17.1.12)"
+  echo "  --host <Proxmox Host>          Proxmox server IP or hostname (default: 192.168.1.12)"
   echo "  --user <Username>              Proxmox API username (default: root@pam)"
-  echo "  --password <Password>          Proxmox API password (required)"
+  echo "  --password <Password>          Proxmox API password (required for password auth)"
   echo "  --node <Node Name>             Proxmox node name (default: pve02)"
-  echo "  --storage <Storage Name>       Proxmox storage name for ISO upload (default: media)"
-  echo "  --template <Template ID>       Template VM ID (default: 9500)"
-  echo "  --resize <Disk Resize>         Disk resize value (default: +80G)"
-  echo "  --name <VM Name>               Name of the new VM (default: mynewvm)"
-  echo "  --start-id <Start VM ID>       Start searching for VM ID from this value (default: 501)"
-  echo "  --user-data <User Data File>   Path to the Cloud-Init user_data file (required)"
+  echo "  --storage <Storage Name>       Proxmox storage name for ISO upload (default: from .env STORAGE_NAME_ISO)"
+  echo "  --template <Template ID>       Template VM ID (default: from .env CPVM_TEMPLATE_VM_ID)"
+  echo "  --resize <Disk Resize>         Disk resize value (default: from .env CPVM_DISK_RESIZE)"
+  echo "  --name <VM Name>               Name of the new VM (default: from .env CPVM_VM_NAME)"
+  echo "  --start-id <Start VM ID>       Start searching for VM ID from this value (default: from .env CPVM_VM_ID_START)"
+  echo "  --user-data <User Data File>   Path to the Cloud-Init user_data file (default: from .env CPVM_USER_DATA_FILE)"
   echo "  --debug                        Print API responses for debugging to STDERR"
   echo "  -h, --help                     Show this help message"
 }
@@ -48,12 +46,12 @@ parse_arguments() {
       --user) PVE_USER="$2"; shift; shift ;;
       --password) PVE_PASSWORD="$2"; shift; shift ;;
       --node) NODE_NAME="$2"; shift; shift ;;
-      --storage) STORAGE_NAME="$2"; shift; shift ;;
-      --template) TEMPLATE_VM_ID="$2"; shift; shift ;;
-      --resize) DISK_RESIZE="$2"; shift; shift ;;
-      --name) VM_NAME="$2"; shift; shift ;;
-      --start-id) VM_ID_START="$2"; shift; shift ;;
-      --user-data) USER_DATA_FILE="$2"; shift; shift ;;
+      --storage) STORAGE_NAME_ISO="$2"; shift; shift ;;
+      --template) CPVM_TEMPLATE_VM_ID="$2"; shift; shift ;;
+      --resize) CPVM_DISK_RESIZE="$2"; shift; shift ;;
+      --name) CPVM_VM_NAME="$2"; shift; shift ;;
+      --start-id) CPVM_VM_ID_START="$2"; shift; shift ;;
+      --user-data) CPVM_USER_DATA_FILE="$2"; shift; shift ;;
       --debug) DEBUG_MODE=true; shift ;;
       -h|--help) print_help; exit 0 ;;
       *) echo "Unknown option: $1"; print_help; exit 1 ;;
@@ -63,19 +61,19 @@ parse_arguments() {
 
 # Validate required arguments
 validate_arguments() {
-  if [[ -z "$USER_DATA_FILE" ]]; then
+  if [[ -z "$CPVM_USER_DATA_FILE" ]]; then
     echo "Error: --user-data argument is required and must point to a valid file."
     print_help
     exit 1
   fi
 
-  if [[ ! -f "$USER_DATA_FILE" ]]; then
-    echo "Error: The file specified by --user-data does not exist: $USER_DATA_FILE"
+  if [[ ! -f "$CPVM_USER_DATA_FILE" ]]; then
+    echo "Error: The file specified by --user-data does not exist: $CPVM_USER_DATA_FILE"
     exit 1
   fi
 
-  if [[ -z "$PVE_HOST" || -z "$PVE_USER" || -z "$PVE_PASSWORD" || -z "$NODE_NAME" || -z "$STORAGE_NAME" ]]; then
-    echo "Error: Missing one or more required arguments (--host, --user, --password, --node, --storage)."
+  if [[ -z "$PVE_HOST" || -z "$PVE_USER" || -z "$NODE_NAME" || -z "$STORAGE_NAME_ISO" ]]; then
+    echo "Error: Missing one or more required arguments (--host, --user, --node, --storage)."
     print_help
     exit 1
   fi
@@ -112,6 +110,37 @@ authenticate() {
   echo "Authentication successful."
 }
 
+# Initialize auth headers for token or password auth
+init_auth() {
+  local auth_mode="$PVE_AUTH_MODE"
+  if [[ -z "$auth_mode" ]]; then
+    if [[ -n "$PVE_TOKEN_ID" && -n "$PVE_TOKEN_SECRET" ]]; then
+      auth_mode="token"
+    else
+      auth_mode="password"
+    fi
+  fi
+
+  if [[ "$auth_mode" == "token" ]]; then
+    if [[ -z "$PVE_USER" || -z "$PVE_TOKEN_ID" || -z "$PVE_TOKEN_SECRET" ]]; then
+      echo "Error: Token auth requires PVE_USER, PVE_TOKEN_ID, and PVE_TOKEN_SECRET."
+      exit 1
+    fi
+    local token_id_full="$PVE_TOKEN_ID"
+    if [[ "$token_id_full" != *"!"* ]]; then
+      token_id_full="${PVE_USER}!${PVE_TOKEN_ID}"
+    fi
+    AUTH_HEADER_ARGS=(-H "Authorization: PVEAPIToken=${token_id_full}=${PVE_TOKEN_SECRET}")
+  else
+    if [[ -z "$PVE_PASSWORD" ]]; then
+      echo "Error: Password auth requires PVE_PASSWORD."
+      exit 1
+    fi
+    authenticate
+    AUTH_HEADER_ARGS=(-H "CSRFPreventionToken: $CSRF_TOKEN" -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE")
+  fi
+}
+
 # Function to debug API responses
 debug_response() {
   local response="$1"
@@ -125,12 +154,11 @@ debug_response() {
 get_available_vm_id() {
   local max_attempts=100
   local attempts=0
-  local current_id=$VM_ID_START
+  local current_id=$CPVM_VM_ID_START
 
   while (( attempts < max_attempts )); do
     local response=$(curl -s -k -X GET "$PROXMOX_API_URL/cluster/nextid?vmid=$current_id" \
-      -H "CSRFPreventionToken: $CSRF_TOKEN" \
-      -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE")
+      "${AUTH_HEADER_ARGS[@]}")
 
     debug_response "$response"
 
@@ -151,33 +179,32 @@ get_available_vm_id() {
 # Function to create a Cloud-Init ISO
 create_cloudinit_iso() {
   echo "Creating Cloud-Init ISO..."
-  mkdir -p "$TEMP_ISO_DIR"
-  mkdir -p "$TEMP_FS_DIR/openstack/2015-10-15"
+  mkdir -p "$CPVM_TEMP_ISO_DIR"
+  mkdir -p "$CPVM_TEMP_FS_DIR/openstack/2015-10-15"
 
-  cp "$USER_DATA_FILE" "$TEMP_FS_DIR/openstack/2015-10-15/user_data"
+  cp "$CPVM_USER_DATA_FILE" "$CPVM_TEMP_FS_DIR/openstack/2015-10-15/user_data"
 
-  local iso_filename="CI_${VM_ID}_${VM_NAME}.iso"
-  mkisofs -r -J -jcharset utf-8 -V config-2 -o "$TEMP_ISO_DIR/$iso_filename" "$TEMP_FS_DIR" > /dev/null 2>&1
+  local iso_filename="CI_${VM_ID}_${CPVM_VM_NAME}.iso"
+  mkisofs -r -J -jcharset utf-8 -V config-2 -o "$CPVM_TEMP_ISO_DIR/$iso_filename" "$CPVM_TEMP_FS_DIR" > /dev/null 2>&1
 
   if [[ $? -ne 0 ]]; then
     echo "Error: Failed to create Cloud-Init ISO."
-    rm -rf "$TEMP_FS_DIR" "$TEMP_ISO_DIR"
+    rm -rf "$CPVM_TEMP_FS_DIR" "$CPVM_TEMP_ISO_DIR"
     exit 1
   fi
 
-  rm -rf "$TEMP_FS_DIR"
-  echo "Cloud-Init ISO created at $TEMP_ISO_DIR/$iso_filename."
+  rm -rf "$CPVM_TEMP_FS_DIR"
+  echo "Cloud-Init ISO created at $CPVM_TEMP_ISO_DIR/$iso_filename."
 }
 
 # Function to upload the ISO
 upload_iso() {
-  local iso_filename="CI_${VM_ID}_${VM_NAME}.iso"
-  echo "Uploading Cloud-Init ISO ($iso_filename) to Proxmox storage ($STORAGE_NAME)..."
-  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/storage/$STORAGE_NAME/upload" \
-    -H "CSRFPreventionToken: $CSRF_TOKEN" \
-    -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE" \
+  local iso_filename="CI_${VM_ID}_${CPVM_VM_NAME}.iso"
+  echo "Uploading Cloud-Init ISO ($iso_filename) to Proxmox storage ($STORAGE_NAME_ISO)..."
+  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/storage/$STORAGE_NAME_ISO/upload" \
+    "${AUTH_HEADER_ARGS[@]}" \
     -F "content=iso" \
-    -F "filename=@$TEMP_ISO_DIR/$iso_filename")
+    -F "filename=@$CPVM_TEMP_ISO_DIR/$iso_filename")
 
   debug_response "$response"
 
@@ -188,18 +215,17 @@ upload_iso() {
     exit 1
   fi
 
-  rm -rf "$TEMP_ISO_DIR"
+  rm -rf "$CPVM_TEMP_ISO_DIR"
   echo "Cloud-Init ISO uploaded and temporary ISO folder cleaned up successfully."
 }
 
 # Function to clone a VM from the template
 clone_vm() {
-  echo "Cloning template VM ($TEMPLATE_VM_ID) to create VM ($VM_ID)..."
-  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$TEMPLATE_VM_ID/clone" \
-    -H "CSRFPreventionToken: $CSRF_TOKEN" \
-    -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE" \
+  echo "Cloning template VM ($CPVM_TEMPLATE_VM_ID) to create VM ($VM_ID)..."
+  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPVM_TEMPLATE_VM_ID/clone" \
+    "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "newid=$VM_ID" \
-    --data-urlencode "name=$VM_NAME")
+    --data-urlencode "name=$CPVM_VM_NAME")
 
   debug_response "$response"
 
@@ -217,10 +243,9 @@ clone_vm() {
 resize_disk() {
   echo "Resizing disk for VM $VM_ID..."
   local response=$(curl -s -k -X PUT "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/resize" \
-    -H "CSRFPreventionToken: $CSRF_TOKEN" \
-    -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE" \
+    "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "disk=scsi0" \
-    --data-urlencode "size=$DISK_RESIZE")
+    --data-urlencode "size=$CPVM_DISK_RESIZE")
 
   debug_response "$response"
 
@@ -234,17 +259,16 @@ resize_disk() {
     exit 1
   fi
 
-  echo "Disk resized successfully to $DISK_RESIZE."
+  echo "Disk resized successfully to $CPVM_DISK_RESIZE."
 }
 
 # Function to attach the ISO to the VM
 attach_iso() {
   echo "Attaching Cloud-Init ISO to VM $VM_ID..."
-  local iso_filename="CI_${VM_ID}_${VM_NAME}.iso"
+  local iso_filename="CI_${VM_ID}_${CPVM_VM_NAME}.iso"
   local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/config" \
-    -H "CSRFPreventionToken: $CSRF_TOKEN" \
-    -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE" \
-    --data-urlencode "ide2=$STORAGE_NAME:iso/$iso_filename,media=cdrom")
+    "${AUTH_HEADER_ARGS[@]}" \
+    --data-urlencode "ide2=$STORAGE_NAME_ISO:iso/$iso_filename,media=cdrom")
 
   debug_response "$response"
 
@@ -262,7 +286,7 @@ attach_iso() {
 main() {
   parse_arguments "$@"
   validate_arguments
-  authenticate
+  init_auth
   get_available_vm_id
   create_cloudinit_iso
   upload_iso

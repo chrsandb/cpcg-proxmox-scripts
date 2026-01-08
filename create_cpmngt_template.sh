@@ -1,42 +1,39 @@
 #!/bin/bash
 
-# Default Variables
-PVE_HOST="10.17.1.12"
-PVE_USER="root@pam"
-PVE_PASSWORD=""
-NODE_NAME="pve02"
-STORAGE_NAME="vm_data"
-TEMPLATE_ID=9500
-TEMPLATE_NAME="cp-mngt-template"
-CORES=8
-MEMORY=16384
-BRIDGE="vmbr0"
-IMAGE_PATH="/mnt/pve/media/template/qcow/"
-QCOW2_IMAGE="jaguar_opt_main-777-991001696.qcow2"
-COPY_IMAGE=false
-PROXMOX_PORT="8006"
-PROXMOX_API_URL=""
-DEBUG_MODE=false
+# Load configuration from .env
+load_env() {
+    local env_file=".env"
+    if [[ ! -f "$env_file" ]]; then
+        echo "Error: $env_file not found. Copy .env.template to .env and update values."
+        exit 1
+    fi
+    # shellcheck disable=SC1091
+    source "$env_file"
+}
 
+load_env
+
+PROXMOX_API_URL=""
 CSRF_TOKEN=""
 PVE_AUTH_COOKIE=""
+AUTH_HEADER_ARGS=()
 
 # Function to print the help text
 print_help() {
   echo "Usage: $0 [OPTIONS]"
   echo ""
   echo "Options:"
-  echo "  --host <Proxmox Host>          Proxmox server IP or hostname (default: 10.17.1.21)"
+  echo "  --host <Proxmox Host>          Proxmox server IP or hostname (default: 192.168.1.21)"
   echo "  --user <Username>              Proxmox API username (default: root@pam)"
-  echo "  --password <Password>          Proxmox API password (required)"
+  echo "  --password <Password>          Proxmox API password (required for password auth)"
   echo "  --node <Node Name>             Proxmox node name (default: pve)"
-  echo "  --storage <Storage Name>       Proxmox storage name (default: vm_data)"
-  echo "  --template-id <Template ID>    VM ID for the template (default: 9500)"
-  echo "  --template-name <Template Name> VM name for the template (default: cp-mngt-template)"
-  echo "  --cores <Cores>                Number of CPU cores (default: 8)"
-  echo "  --memory <Memory>              Memory size in MB (default: 16384)"
-  echo "  --bridge <Bridge>              Network bridge (default: vmbr0)"
-  echo "  --qcow2_image <QCOW2 File>     QCOW2 file path (default: jaguar_opt_main-777-991001696.qcow2)"
+  echo "  --storage <Storage Name>       Proxmox storage name (default: from .env STORAGE_NAME_DISK)"
+  echo "  --template-id <Template ID>    VM ID for the template (default: from .env CPMNGT_TEMPLATE_ID)"
+  echo "  --template-name <Template Name> VM name for the template (default: from .env CPMNGT_TEMPLATE_NAME)"
+  echo "  --cores <Cores>                Number of CPU cores (default: from .env CPMNGT_CORES)"
+  echo "  --memory <Memory>              Memory size in MB (default: from .env CPMNGT_MEMORY)"
+  echo "  --bridge <Bridge>              Network bridge (default: from .env CPMNGT_BRIDGE)"
+  echo "  --qcow2_image <QCOW2 File>     QCOW2 file path (default: from .env CPMNGT_QCOW2_IMAGE)"
   echo "  --copy-image                   Copy the QCOW2 file to the Proxmox server"
   echo "  --debug                        Print API responses for debugging to STDERR"
   echo "  -h, --help                     Show this help message"
@@ -50,14 +47,14 @@ parse_arguments() {
       --user) PVE_USER="$2"; shift; shift ;;
       --password) PVE_PASSWORD="$2"; shift; shift ;;
       --node) NODE_NAME="$2"; shift; shift ;;
-      --storage) STORAGE_NAME="$2"; shift; shift ;;
-      --template-id) TEMPLATE_ID="$2"; shift; shift ;;
-      --template-name) TEMPLATE_NAME="$2"; shift; shift ;;
-      --cores) CORES="$2"; shift; shift ;;
-      --memory) MEMORY="$2"; shift; shift ;;
-      --bridge) BRIDGE="$2"; shift; shift ;;
-      --qcow2_image) QCOW2_IMAGE="$2"; shift; shift ;;
-      --copy-image) COPY_IMAGE=true; shift ;;
+      --storage) STORAGE_NAME_DISK="$2"; shift; shift ;;
+      --template-id) CPMNGT_TEMPLATE_ID="$2"; shift; shift ;;
+      --template-name) CPMNGT_TEMPLATE_NAME="$2"; shift; shift ;;
+      --cores) CPMNGT_CORES="$2"; shift; shift ;;
+      --memory) CPMNGT_MEMORY="$2"; shift; shift ;;
+      --bridge) CPMNGT_BRIDGE="$2"; shift; shift ;;
+      --qcow2_image) CPMNGT_QCOW2_IMAGE="$2"; shift; shift ;;
+      --copy-image) CPMNGT_COPY_IMAGE=true; shift ;;
       --debug) DEBUG_MODE=true; shift ;;
       -h|--help) print_help; exit 0 ;;
       *) echo "Unknown option: $1"; print_help; exit 1 ;;
@@ -67,14 +64,14 @@ parse_arguments() {
 
 # Validate required arguments
 validate_arguments() {
-  if [[ -z "$QCOW2_IMAGE" || (! -f "$QCOW2_IMAGE" && "$COPY_IMAGE" == true) ]]; then
+  if [[ -z "$CPMNGT_QCOW2_IMAGE" || (! -f "$CPMNGT_QCOW2_IMAGE" && "$CPMNGT_COPY_IMAGE" == true) ]]; then
     echo "Error: --qcow2_image argument is required and must point to a valid QCOW2 file."
     print_help
     exit 1
   fi
 
-  if [[ -z "$PVE_HOST" || -z "$PVE_USER" || -z "$PVE_PASSWORD" || -z "$NODE_NAME" || -z "$STORAGE_NAME" ]]; then
-    echo "Error: Missing one or more required arguments (--host, --user, --password, --node, --storage)."
+  if [[ -z "$PVE_HOST" || -z "$PVE_USER" || -z "$NODE_NAME" || -z "$STORAGE_NAME_DISK" ]]; then
+    echo "Error: Missing one or more required arguments (--host, --user, --node, --storage)."
     print_help
     exit 1
   fi
@@ -108,6 +105,37 @@ authenticate() {
   echo "Authentication successful."
 }
 
+# Initialize auth headers for token or password auth
+init_auth() {
+  local auth_mode="$PVE_AUTH_MODE"
+  if [[ -z "$auth_mode" ]]; then
+    if [[ -n "$PVE_TOKEN_ID" && -n "$PVE_TOKEN_SECRET" ]]; then
+      auth_mode="token"
+    else
+      auth_mode="password"
+    fi
+  fi
+
+  if [[ "$auth_mode" == "token" ]]; then
+    if [[ -z "$PVE_USER" || -z "$PVE_TOKEN_ID" || -z "$PVE_TOKEN_SECRET" ]]; then
+      echo "Error: Token auth requires PVE_USER, PVE_TOKEN_ID, and PVE_TOKEN_SECRET."
+      exit 1
+    fi
+    local token_id_full="$PVE_TOKEN_ID"
+    if [[ "$token_id_full" != *"!"* ]]; then
+      token_id_full="${PVE_USER}!${PVE_TOKEN_ID}"
+    fi
+    AUTH_HEADER_ARGS=(-H "Authorization: PVEAPIToken=${token_id_full}=${PVE_TOKEN_SECRET}")
+  else
+    if [[ -z "$PVE_PASSWORD" ]]; then
+      echo "Error: Password auth requires PVE_PASSWORD."
+      exit 1
+    fi
+    authenticate
+    AUTH_HEADER_ARGS=(-H "CSRFPreventionToken: $CSRF_TOKEN" -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE")
+  fi
+}
+
 # Function to debug API responses
 debug_response() {
   local response="$1"
@@ -117,11 +145,49 @@ debug_response() {
   fi
 }
 
+# Wait for a Proxmox task to complete and validate exit status
+wait_for_task() {
+  local upid="$1"
+  local task_name="$2"
+  local timeout=300
+  local interval=5
+  local elapsed=0
+
+  if [[ -z "$upid" || "$upid" == "null" ]]; then
+    echo "Error: Missing task ID for $task_name."
+    exit 1
+  fi
+
+  while (( elapsed < timeout )); do
+    local response=$(curl -s -k -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/tasks/$upid/status" \
+      "${AUTH_HEADER_ARGS[@]}")
+
+    debug_response "$response"
+
+    local status=$(echo "$response" | jq -r '.data.status // empty')
+    local exitstatus=$(echo "$response" | jq -r '.data.exitstatus // empty')
+
+    if [[ "$status" == "stopped" ]]; then
+      if [[ "$exitstatus" != "OK" ]]; then
+        echo "Error: Task $task_name failed with status: $exitstatus"
+        exit 1
+      fi
+      return 0
+    fi
+
+    sleep "$interval"
+    elapsed=$((elapsed + interval))
+  done
+
+  echo "Error: Timeout waiting for task $task_name to complete."
+  exit 1
+}
+
 # Function to SCP the QCOW2 file
 scp_qcow2_image() {
-  if $COPY_IMAGE; then
+  if $CPMNGT_COPY_IMAGE; then
     echo "Transferring QCOW2 image to Proxmox server..."
-    scp "$QCOW2_IMAGE" "$PVE_USER@$PVE_HOST:$IMAGE_PATH"
+    scp "$CPMNGT_QCOW2_IMAGE" "$PVE_USER@$PVE_HOST:$CPMNGT_IMAGE_PATH"
     if [[ $? -ne 0 ]]; then
       echo "Error: Failed to transfer QCOW2 file to Proxmox server."
       exit 1
@@ -134,15 +200,14 @@ scp_qcow2_image() {
 
 # Function to create a new VM for the template
 create_vm() {
-  echo "Creating VM $TEMPLATE_ID for the template..."
+  echo "Creating VM $CPMNGT_TEMPLATE_ID for the template..."
   local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu" \
-    -H "CSRFPreventionToken: $CSRF_TOKEN" \
-    -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE" \
-    --data-urlencode "vmid=$TEMPLATE_ID" \
-    --data-urlencode "name=$TEMPLATE_NAME" \
-    --data-urlencode "cores=$CORES" \
-    --data-urlencode "memory=$MEMORY" \
-    --data-urlencode "net0=virtio,bridge=$BRIDGE" \
+    "${AUTH_HEADER_ARGS[@]}" \
+    --data-urlencode "vmid=$CPMNGT_TEMPLATE_ID" \
+    --data-urlencode "name=$CPMNGT_TEMPLATE_NAME" \
+    --data-urlencode "cores=$CPMNGT_CORES" \
+    --data-urlencode "memory=$CPMNGT_MEMORY" \
+    --data-urlencode "net0=virtio,bridge=$CPMNGT_BRIDGE" \
     --data-urlencode "scsihw=virtio-scsi-pci")
 
   debug_response "$response"
@@ -158,21 +223,20 @@ create_vm() {
 
 # Function to wait for scsi0 disk to exist
 wait_for_scsi0_disk() {
-  echo "Waiting for scsi0 disk to be available for VM $TEMPLATE_ID..."
+  echo "Waiting for scsi0 disk to be available for VM $CPMNGT_TEMPLATE_ID..."
   local timeout=120  # Timeout in seconds
   local interval=5   # Interval between checks
   local elapsed=0
 
   while (( elapsed < timeout )); do
-    local response=$(curl -s -k -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$TEMPLATE_ID/config" \
-      -H "CSRFPreventionToken: $CSRF_TOKEN" \
-      -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE")
+    local response=$(curl -s -k -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPMNGT_TEMPLATE_ID/config" \
+      "${AUTH_HEADER_ARGS[@]}")
 
     debug_response "$response"
 
     local scsi0=$(echo "$response" | jq -r '.data.scsi0 // empty')
     if [[ -n "$scsi0" ]]; then
-      echo "scsi0 disk is available for VM $TEMPLATE_ID."
+      echo "scsi0 disk is available for VM $CPMNGT_TEMPLATE_ID."
       return 0
     fi
 
@@ -180,20 +244,20 @@ wait_for_scsi0_disk() {
     elapsed=$((elapsed + interval))
   done
 
-  echo "Error: Timeout waiting for scsi0 disk to be available for VM $TEMPLATE_ID."
+  echo "Error: Timeout waiting for scsi0 disk to be available for VM $CPMNGT_TEMPLATE_ID."
   exit 1
 }
 
 # Function to import the QCOW2 image
 import_qcow2_image() {
   echo "Importing QCOW2 image into the VM..."
-  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$TEMPLATE_ID/config" \
-    -H "CSRFPreventionToken: $CSRF_TOKEN" \
-    -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE" \
-    --data-urlencode "scsi0=$STORAGE_NAME:0,import-from=$IMAGE_PATH$(basename "$QCOW2_IMAGE")")
+  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPMNGT_TEMPLATE_ID/config" \
+    "${AUTH_HEADER_ARGS[@]}" \
+    --data-urlencode "scsi0=$STORAGE_NAME_DISK:0,import-from=$CPMNGT_IMAGE_PATH$(basename "$CPMNGT_QCOW2_IMAGE")")
 
   debug_response "$response"
 
+  local upid=$(echo "$response" | jq -r '.data // empty')
   local error=$(echo "$response" | jq -r '.errors // empty')
   if [[ $? -ne 0 || -n "$error" ]]; then
     echo "Error: Failed to import QCOW2 image. Error details:"
@@ -201,6 +265,7 @@ import_qcow2_image() {
     exit 1
   fi
 
+  wait_for_task "$upid" "import_qcow2_image"
   wait_for_scsi0_disk  # Ensure scsi0 disk is ready before proceeding
 
   echo "QCOW2 image imported successfully."
@@ -208,10 +273,9 @@ import_qcow2_image() {
 
 # Function to configure the VM for templating
 configure_vm() {
-  echo "Configuring VM $TEMPLATE_ID for template creation..."
-  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$TEMPLATE_ID/config" \
-    -H "CSRFPreventionToken: $CSRF_TOKEN" \
-    -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE" \
+  echo "Configuring VM $CPMNGT_TEMPLATE_ID for template creation..."
+  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPMNGT_TEMPLATE_ID/config" \
+    "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "boot=order=scsi0" \
     --data-urlencode "serial0=socket" \
     --data-urlencode "vga=serial0" \
@@ -230,10 +294,9 @@ configure_vm() {
 
 # Function to convert the VM to a template
 convert_to_template() {
-  echo "Converting VM $TEMPLATE_ID to a template..."
-  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$TEMPLATE_ID/template" \
-    -H "CSRFPreventionToken: $CSRF_TOKEN" \
-    -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE")
+  echo "Converting VM $CPMNGT_TEMPLATE_ID to a template..."
+  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPMNGT_TEMPLATE_ID/template" \
+    "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
 
@@ -250,7 +313,7 @@ convert_to_template() {
 main() {
   parse_arguments "$@"
   validate_arguments
-  authenticate
+  init_auth
   scp_qcow2_image
   create_vm
   import_qcow2_image
