@@ -128,7 +128,7 @@ All scripts load defaults from `.env` and allow CLI flags to override them.
 - `--resize <value>`: Disk resize value (default: from `.env`)
 - `--name <name>`: VM name (default: from `.env`)
 - `--start-id <id>`: Start searching for VM IDs from this value (default: from `.env`)
-- `--user-data <file>`: Path to Cloud-Init user-data file (default: from `.env`)
+- `--user-data <file>`: Path to Cloud-Init user-data YAML file (default: from `.env`). See example files: `cp-gw1-single-user_data-example.yaml` and `cp-mngt-user_data-example.yaml`
 - `--ca-cert <path>`: Path to CA certificate for TLS validation
 - `--insecure`: Allow insecure TLS (self-signed). Not recommended.
 - `--debug`: Enable debug output
@@ -248,7 +248,7 @@ If `PVE_PASSWORD` is not provided, the scripts will securely prompt for it at ru
 - Hosts are validated as IPv4 addresses.
 - VM IDs, cores, memory, NIC counts, and start IDs must be positive integers.
 - Disk resize values must match `+<number>[G|M]` (e.g., `+10G`).
-- File paths (e.g., `--user-data`, QCOW2 images) must exist and be readable when required.
+- File paths (e.g., `--user-data` YAML files, QCOW2 images) must exist and be readable when required.
 
 ### Reliability / Retries
 
@@ -290,11 +290,19 @@ STORAGE_NAME_ISO="local"
 
 ### Cloud-Init Configuration
 
-For VM deployment, you can provide custom Cloud-Init configuration:
+For VM deployment, Cloud-Init configuration is provided via YAML files following the [Cloud-Init documentation format](https://cloudinit.readthedocs.io/).
 
-- **user-data**: User and SSH key configuration
-- **network-config**: Network interface settings
-- **meta-data**: Instance metadata
+**User-Data File (YAML format)**:
+- Defines initial VM configuration including users, SSH keys, hostname, and startup commands
+- Must start with `#cloud-config` header
+- **Example files provided**:
+  - `cp-gw1-single-user_data-example.yaml` - Gateway VM configuration example
+  - `cp-mngt-user_data-example.yaml` - Management VM configuration example
+
+**Common Cloud-Init Components**:
+- **user-data**: User accounts, SSH keys, hostname, packages, and run commands (YAML format)
+- **network-config**: Network interface settings (optional, not used by these scripts)
+- **meta-data**: Instance metadata (optional, not used by these scripts)
 
 ## Security Considerations
 
