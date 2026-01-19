@@ -222,6 +222,6 @@ wait_for_task() {
 }
 
 prompt_for_password() {
-  read -s -p "Enter Proxmox password: " PVE_PASSWORD
+  read -rs -p "Enter Proxmox password: " PVE_PASSWORD
   echo
 }

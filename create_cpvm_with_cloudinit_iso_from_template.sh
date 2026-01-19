@@ -143,9 +143,7 @@ create_cloudinit_iso() {
   cp "$CPVM_USER_DATA_FILE" "$CPVM_TEMP_FS_DIR/openstack/2015-10-15/user_data"
 
   local iso_filename="CI_${VM_ID}_${CPVM_VM_NAME}.iso"
-  mkisofs -r -J -jcharset utf-8 -V config-2 -o "$CPVM_TEMP_ISO_DIR/$iso_filename" "$CPVM_TEMP_FS_DIR" > /dev/null 2>&1
-
-  if [[ $? -ne 0 ]]; then
+  if ! mkisofs -r -J -jcharset utf-8 -V config-2 -o "$CPVM_TEMP_ISO_DIR/$iso_filename" "$CPVM_TEMP_FS_DIR" > /dev/null 2>&1; then
     echo "Error: Failed to create Cloud-Init ISO."
     rm -rf "$CPVM_TEMP_FS_DIR" "$CPVM_TEMP_ISO_DIR"
     exit 1
@@ -188,7 +186,7 @@ clone_vm() {
   debug_response "$response"
 
   local error=$(echo "$response" | jq -r '.errors // empty')
-  if [[ $? -ne 0 || -n "$error" ]]; then
+  if [[ -n "$error" ]]; then
     echo "Error: Failed to clone the VM. Error details:"
     echo "$error"
     exit 1
@@ -231,7 +229,7 @@ attach_iso() {
   debug_response "$response"
 
   local error=$(echo "$response" | jq -r '.errors // empty')
-  if [[ $? -ne 0 || -n "$error" ]]; then
+  if [[ -n "$error" ]]; then
     echo "Error: Failed to attach ISO to the VM. Error details:"
     echo "$error"
     exit 1

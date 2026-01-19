@@ -113,8 +113,7 @@ init_curl_opts() {
 scp_qcow2_image() {
   if $CPMNGT_COPY_IMAGE; then
     echo "Transferring QCOW2 image to Proxmox server..."
-    scp "$CPMNGT_QCOW2_IMAGE" "$PVE_USER@$PVE_HOST:$CPMNGT_IMAGE_PATH"
-    if [[ $? -ne 0 ]]; then
+    if ! scp "$CPMNGT_QCOW2_IMAGE" "$PVE_USER@$PVE_HOST:$CPMNGT_IMAGE_PATH"; then
       echo "Error: Failed to transfer QCOW2 file to Proxmox server."
       exit 1
     fi
@@ -185,7 +184,7 @@ import_qcow2_image() {
 
   local upid=$(echo "$response" | jq -r '.data // empty')
   local error=$(echo "$response" | jq -r '.errors // empty')
-  if [[ $? -ne 0 || -n "$error" ]]; then
+  if [[ -n "$error" ]]; then
     echo "Error: Failed to import QCOW2 image. Error details:"
     echo "$error"
     exit 1
@@ -210,7 +209,7 @@ configure_vm() {
   debug_response "$response"
 
   local error=$(echo "$response" | jq -r '.errors // empty')
-  if [[ $? -ne 0 || -n "$error" ]]; then
+  if [[ -n "$error" ]]; then
     echo "Error: Failed to configure the VM. Error details:"
     echo "$error"
     exit 1
@@ -227,7 +226,7 @@ convert_to_template() {
   debug_response "$response"
 
   local error=$(echo "$response" | jq -r '.errors // empty')
-  if [[ $? -ne 0 || -n "$error" ]]; then
+  if [[ -n "$error" ]]; then
     echo "Error: Failed to convert VM to a template. Error details:"
     echo "$error"
     exit 1
