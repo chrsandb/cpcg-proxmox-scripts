@@ -11,6 +11,56 @@ EXIT_USER=1
 EXIT_SYSTEM=2
 EXIT_API=3
 
+bail() {
+  local code="$1"; shift
+  log_error "$*"
+  exit "$code"
+}
+
+is_ipv4() {
+  local ip="$1"
+  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  IFS='.' read -r o1 o2 o3 o4 <<< "$ip"
+  for o in "$o1" "$o2" "$o3" "$o4"; do
+    if (( o < 0 || o > 255 )); then
+      return 1
+    fi
+  done
+  return 0
+}
+
+validate_ipv4_or_bail() {
+  local ip="$1"
+  local context="$2"
+  if ! is_ipv4 "$ip"; then
+    bail "$EXIT_USER" "Invalid IPv4 address for ${context}: ${ip}"
+  fi
+}
+
+validate_numeric_or_bail() {
+  local value="$1"
+  local context="$2"
+  if [[ -z "$value" || ! "$value" =~ ^[0-9]+$ ]]; then
+    bail "$EXIT_USER" "${context} must be a positive integer (got: '${value}')"
+  fi
+}
+
+validate_disk_resize_or_bail() {
+  local value="$1"
+  local context="$2"
+  if [[ -n "$value" && ! "$value" =~ ^\+[0-9]+[GM]?$ ]]; then
+    bail "$EXIT_USER" "${context} must match +<number>[G|M], e.g., +10G (got: '${value}')"
+  fi
+}
+
+require_file_readable() {
+  local path="$1"
+  local context="$2"
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    bail "$EXIT_USER" "Missing or unreadable file for ${context}: ${path}"
+  fi
+}
+
 script_timestamp() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
 }

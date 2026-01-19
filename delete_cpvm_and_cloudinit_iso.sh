@@ -65,14 +65,14 @@ parse_arguments() {
 # Validate required arguments
 validate_arguments() {
   if [[ -z "$PVE_HOST" || -z "$PVE_USER" || -z "$NODE_NAME" || -z "$STORAGE_NAME_ISO" || -z "$VM_ID" ]]; then
-    echo "Error: Missing one or more required arguments (--host, --user, --node, --storage, --vm-id)."
-    print_help
-    exit 1
+    bail "$EXIT_USER" "Missing one or more required arguments (--host, --user, --node, --storage, --vm-id)."
   fi
 
+  validate_ipv4_or_bail "$PVE_HOST" "--host"
+  validate_numeric_or_bail "$VM_ID" "--vm-id"
+
   if [[ "$PVE_USER" != *@* ]]; then
-    echo "Error: Username must contain '@'. Example: root@pam"
-    exit 1
+    bail "$EXIT_USER" "Username must contain '@'. Example: root@pam"
   fi
 
   # Build the full Proxmox API URL

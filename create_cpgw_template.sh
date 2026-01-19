@@ -76,20 +76,21 @@ parse_arguments() {
 # Validate required arguments
 validate_arguments() {
   if [[ -z "$CPGW_QCOW2_IMAGE" || (! -f "$CPGW_QCOW2_IMAGE" && "$CPGW_COPY_IMAGE" == true) ]]; then
-    echo "Error: --qcow2_image argument is required and must point to a valid QCOW2 file."
-    print_help
-    exit 1
+    bail "$EXIT_USER" "--qcow2_image is required and must point to a valid QCOW2 file when copying."
   fi
 
   if [[ -z "$PVE_HOST" || -z "$PVE_USER" || -z "$NODE_NAME" || -z "$STORAGE_NAME_DISK" ]]; then
-    echo "Error: Missing one or more required arguments (--host, --user, --node, --storage)."
-    print_help
-    exit 1
+    bail "$EXIT_USER" "Missing one or more required arguments (--host, --user, --node, --storage)."
   fi
 
+  validate_ipv4_or_bail "$PVE_HOST" "--host"
+  validate_numeric_or_bail "$CPGW_TEMPLATE_ID" "--template-id"
+  validate_numeric_or_bail "$CPGW_CORES" "--cores"
+  validate_numeric_or_bail "$CPGW_MEMORY" "--memory"
+  validate_numeric_or_bail "$CPGW_NICS" "--nics"
+
   if [[ "$PVE_USER" != *@* ]]; then
-    echo "Error: Username must contain '@'. Example: root@pam"
-    exit 1
+    bail "$EXIT_USER" "Username must contain '@'. Example: root@pam"
   fi
 
   # Build the full Proxmox API URL

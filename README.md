@@ -220,6 +220,13 @@ If `PVE_PASSWORD` is not provided, the scripts will securely prompt for it at ru
 - `--debug` preserves structured API responses while redacting secrets.
 - Traps are registered for `ERR`/`EXIT` to surface unexpected errors early and allow future cleanup hooks.
 
+### Input Validation
+
+- Hosts are validated as IPv4 addresses.
+- VM IDs, cores, memory, NIC counts, and start IDs must be positive integers.
+- Disk resize values must match `+<number>[G|M]` (e.g., `+10G`).
+- File paths (e.g., `--user-data`, QCOW2 images) must exist and be readable when required.
+
 `PVE_TOKEN_ID` can be either the token name (e.g., `mytoken`) or the full token ID (e.g., `root@pam!mytoken`).
 API token authentication has not been tested in this repository yet.
 

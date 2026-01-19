@@ -73,25 +73,22 @@ parse_arguments() {
 # Validate required arguments
 validate_arguments() {
   if [[ -z "$CPVM_USER_DATA_FILE" ]]; then
-    echo "Error: --user-data argument is required and must point to a valid file."
-    print_help
-    exit 1
+    bail "$EXIT_USER" "--user-data argument is required and must point to a valid file."
   fi
 
-  if [[ ! -f "$CPVM_USER_DATA_FILE" ]]; then
-    echo "Error: The file specified by --user-data does not exist: $CPVM_USER_DATA_FILE"
-    exit 1
-  fi
+  require_file_readable "$CPVM_USER_DATA_FILE" "--user-data"
 
   if [[ -z "$PVE_HOST" || -z "$PVE_USER" || -z "$NODE_NAME" || -z "$STORAGE_NAME_ISO" ]]; then
-    echo "Error: Missing one or more required arguments (--host, --user, --node, --storage)."
-    print_help
-    exit 1
+    bail "$EXIT_USER" "Missing one or more required arguments (--host, --user, --node, --storage)."
   fi
 
+  validate_ipv4_or_bail "$PVE_HOST" "--host"
+  validate_numeric_or_bail "$CPVM_TEMPLATE_VM_ID" "--template"
+  validate_numeric_or_bail "$CPVM_VM_ID_START" "--start-id"
+  validate_disk_resize_or_bail "$CPVM_DISK_RESIZE" "--resize"
+
   if [[ "$PVE_USER" != *@* ]]; then
-    echo "Error: Username must contain '@'. Example: root@pam"
-    exit 1
+    bail "$EXIT_USER" "Username must contain '@'. Example: root@pam"
   fi
 
   # Build the full Proxmox API URL
