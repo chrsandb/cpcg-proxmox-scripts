@@ -88,18 +88,18 @@ All scripts load defaults from `.env` and allow CLI flags to override them.
 
 #### Gateway Template
 ```bash
-./create_cpgw_template.sh --password "your-password" [OPTIONS]
+./create_cpgw_template.sh [--password "your-password"] [OPTIONS]
 ```
 
 #### Management Template
 ```bash
-./create_cpmngt_template.sh --password "your-password" [OPTIONS]
+./create_cpmngt_template.sh [--password "your-password"] [OPTIONS]
 ```
 
 **Common Options**:
 - `--host <IP>`: Proxmox server IP (default: from `.env`)
 - `--user <username>`: API username (default: from `.env`)
-- `--password <password>`: API password (required for password auth)
+- `--password <password>`: API password (prompts if omitted; or set `PVE_PASSWORD`)
 - `--node <node>`: Proxmox node name (default: from `.env`)
 - `--storage <storage>`: Storage name (default: from `.env` `STORAGE_NAME_DISK`)
 - `--template-id <id>`: VM ID for template (default: from `.env`)
@@ -108,18 +108,20 @@ All scripts load defaults from `.env` and allow CLI flags to override them.
 - `--memory <MB>`: Memory in MB (default: from `.env`)
 - `--qcow2_image <path>`: Path to QCOW2 image (default: from `.env`)
 - `--copy-image`: Transfer image to Proxmox server
+- `--ca-cert <path>`: Path to CA certificate for TLS validation
+- `--insecure`: Allow insecure TLS (self-signed). Not recommended.
 - `--debug`: Enable debug output
 
 ### VM Creation from Template
 
 ```bash
-./create_cpvm_with_cloudinit_iso_from_template.sh --password "your-password" [OPTIONS]
+./create_cpvm_with_cloudinit_iso_from_template.sh [--password "your-password"] [OPTIONS]
 ```
 
 **Options**:
 - `--host <IP>`: Proxmox server IP (default: from `.env`)
 - `--user <username>`: API username (default: from `.env`)
-- `--password <password>`: API password (required for password auth)
+- `--password <password>`: API password (prompts if omitted; or set `PVE_PASSWORD`)
 - `--node <node>`: Proxmox node name (default: from `.env`)
 - `--storage <storage>`: Storage name for ISO upload (default: from `.env` `STORAGE_NAME_ISO`)
 - `--template <id>`: Source template ID (default: from `.env`)
@@ -127,21 +129,25 @@ All scripts load defaults from `.env` and allow CLI flags to override them.
 - `--name <name>`: VM name (default: from `.env`)
 - `--start-id <id>`: Start searching for VM IDs from this value (default: from `.env`)
 - `--user-data <file>`: Path to Cloud-Init user-data file (default: from `.env`)
+- `--ca-cert <path>`: Path to CA certificate for TLS validation
+- `--insecure`: Allow insecure TLS (self-signed). Not recommended.
 - `--debug`: Enable debug output
 
 ### VM Deletion
 
 ```bash
-./delete_cpvm_and_cloudinit_iso.sh --password "your-password" --vm-id <id> [OPTIONS]
+./delete_cpvm_and_cloudinit_iso.sh [--password "your-password"] --vm-id <id> [OPTIONS]
 ```
 
 **Options**:
 - `--host <IP>`: Proxmox server IP (default: from `.env`)
 - `--user <username>`: API username (default: from `.env`)
-- `--password <password>`: API password (required for password auth)
+- `--password <password>`: API password (prompts if omitted; or set `PVE_PASSWORD`)
 - `--node <node>`: Proxmox node name (default: from `.env`)
 - `--storage <storage>`: Storage name for ISO upload (default: from `.env` `STORAGE_NAME_ISO`)
 - `--vm-id <id>`: VM ID to delete (required)
+- `--ca-cert <path>`: Path to CA certificate for TLS validation
+- `--insecure`: Allow insecure TLS (self-signed). Not recommended.
 - `--debug`: Enable debug output
 
 ## Examples
@@ -205,6 +211,8 @@ You can authenticate with either username/password (default) or an API token.
 - Password auth: set `PVE_AUTH_MODE="password"` and `PVE_PASSWORD`.
 - Token auth: set `PVE_AUTH_MODE="token"` plus `PVE_TOKEN_ID` and `PVE_TOKEN_SECRET`.
 - If `PVE_AUTH_MODE` is empty, token auth is used when both token values are present; otherwise password auth is used.
+
+If `PVE_PASSWORD` is not provided, the scripts will securely prompt for it at runtime to avoid exposing credentials in process arguments.
 
 `PVE_TOKEN_ID` can be either the token name (e.g., `mytoken`) or the full token ID (e.g., `root@pam!mytoken`).
 API token authentication has not been tested in this repository yet.

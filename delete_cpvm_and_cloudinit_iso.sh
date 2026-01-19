@@ -29,7 +29,7 @@ print_help() {
   echo "Options:"
   echo "  --host <Proxmox Host>          Proxmox server IP or hostname (default: 192.168.1.6)"
   echo "  --user <Username>              Proxmox API username (default: root@pam)"
-  echo "  --password <Password>          Proxmox API password (required for password auth)"
+  echo "  --password <Password>          Proxmox API password (prompts if omitted; or set PVE_PASSWORD)"
   echo "  --node <Node Name>             Proxmox node name (default: pve)"
   echo "  --storage <Storage Name>       Proxmox storage name for ISO upload (default: from .env STORAGE_NAME_ISO)"
   echo "  --vm-id <VM ID>                ID of the VM to delete (required)"
