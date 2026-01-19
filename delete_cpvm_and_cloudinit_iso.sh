@@ -98,7 +98,7 @@ prompt_for_password() {
 }
 
 check_vm_exists() {
-  log_info "Checking if VM $VM_ID exists..."
+  progress_substep "Checking if VM exists..."
   local response=$(curl_with_retries -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/current" \
     "${AUTH_HEADER_ARGS[@]}")
 
@@ -108,7 +108,7 @@ check_vm_exists() {
   if [[ -z "$vm_status" || "$vm_status" == "null" ]]; then
     bail "$EXIT_API" "VM $VM_ID does not exist."
   fi
-  log_info "VM $VM_ID exists with status: $vm_status."
+  progress_substep "VM found with status: ${vm_status}"
 }
 
 # Function to retrieve the VM name
@@ -123,12 +123,12 @@ get_vm_name() {
     bail "$EXIT_API" "Unable to retrieve the name for VM $VM_ID."
   fi
 
-  log_info "VM $VM_ID has name: $VM_NAME."
+  progress_substep "VM name: ${VM_NAME}"
 }
 
 # Function to hard stop a VM
 stop_vm() {
-  log_info "Stopping VM $VM_ID..."
+  progress_substep "Sending stop command..."
   local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/stop" \
     "${AUTH_HEADER_ARGS[@]}")
 
@@ -136,13 +136,14 @@ stop_vm() {
 
   check_api_error "$response" "stop the VM"
 
+  progress_substep "Waiting for VM to stop..."
   wait_for_vm_status "$VM_ID" "stopped"
-  log_info "VM $VM_ID has stopped."
+  progress_substep "VM stopped successfully"
 }
 
 # Function to delete a VM
 delete_vm() {
-  echo "Deleting VM $VM_ID..."
+  progress_substep "Removing VM from Proxmox..."
   local response=$(curl_with_retries -X DELETE "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID" \
     "${AUTH_HEADER_ARGS[@]}")
 
@@ -150,13 +151,13 @@ delete_vm() {
 
   check_api_error "$response" "delete the VM"
 
-  echo "VM $VM_ID deleted successfully."
+  progress_substep "VM removed successfully"
 }
 
 # Function to delete the associated ISO
 delete_iso() {
   local iso_filename="CI_${VM_ID}_${VM_NAME}.iso"
-  echo "Deleting ISO $iso_filename from storage $STORAGE_NAME_ISO..."
+  progress_substep "Removing ISO ${iso_filename}..."
   local response=$(curl_with_retries -X DELETE "$PROXMOX_API_URL/nodes/$NODE_NAME/storage/$STORAGE_NAME_ISO/content/$STORAGE_NAME_ISO:iso/$iso_filename" \
     "${AUTH_HEADER_ARGS[@]}")
 
@@ -164,7 +165,7 @@ delete_iso() {
 
   check_api_error "$response" "delete the ISO"
 
-  echo "ISO $iso_filename deleted successfully."
+  progress_substep "ISO removed successfully"
 }
 
 # Main script execution
@@ -173,13 +174,27 @@ main() {
   parse_arguments "$@"
   validate_arguments
   init_curl_opts
+  
+  # Initialize progress tracking
+  init_progress 5
+  
+  progress_step "Authenticating to Proxmox API"
   init_auth
+  
+  progress_step "Verifying VM ${CPVM_DELETE_VM_ID}"
   check_vm_exists
   get_vm_name
+  
+  progress_step "Stopping VM"
   stop_vm
+  
+  progress_step "Deleting VM ${CPVM_DELETE_VM_ID}"
   delete_vm
+  
+  progress_step "Deleting Cloud-Init ISO"
   delete_iso
-  log_info "VM and associated ISO deleted successfully."
+  
+  progress_complete "VM ${CPVM_DELETE_VM_ID} (${VM_NAME}) and associated ISO deleted successfully!"
 }
 
 # Run the main function

@@ -110,6 +110,7 @@ init_curl_opts() {
 
 # Function to find the next available VM ID
 get_available_vm_id() {
+  progress_substep "Searching for available VM ID..."
   local max_attempts=100
   local attempts=0
   local current_id=$CPVM_VM_ID_START
@@ -123,6 +124,7 @@ get_available_vm_id() {
     local vm_id=$(get_jq_data "$response" '.data')
     if [[ -n "$vm_id" && "$vm_id" != "null" ]]; then
       VM_ID="$vm_id"
+      progress_substep "Found available VM ID: ${VM_ID}"
       return 0
     fi
 
@@ -136,7 +138,7 @@ get_available_vm_id() {
 
 # Function to create a Cloud-Init ISO
 create_cloudinit_iso() {
-  echo "Creating Cloud-Init ISO..."
+  progress_substep "Generating Cloud-Init ISO file..."
   mkdir -p "$CPVM_TEMP_ISO_DIR"
   mkdir -p "$CPVM_TEMP_FS_DIR/openstack/2015-10-15"
 
@@ -150,13 +152,13 @@ create_cloudinit_iso() {
   fi
 
   rm -rf "$CPVM_TEMP_FS_DIR"
-  echo "Cloud-Init ISO created at $CPVM_TEMP_ISO_DIR/$iso_filename."
+  progress_substep "ISO created: ${iso_filename}"
 }
 
 # Function to upload the ISO
 upload_iso() {
   local iso_filename="CI_${VM_ID}_${CPVM_VM_NAME}.iso"
-  echo "Uploading Cloud-Init ISO ($iso_filename) to Proxmox storage ($STORAGE_NAME_ISO)..."
+  progress_substep "Uploading ISO to ${STORAGE_NAME_ISO}..."
   local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/storage/$STORAGE_NAME_ISO/upload" \
     "${AUTH_HEADER_ARGS[@]}" \
     -F "content=iso" \
@@ -167,12 +169,12 @@ upload_iso() {
   check_api_error "$response" "upload the ISO"
 
   rm -rf "$CPVM_TEMP_ISO_DIR"
-  echo "Cloud-Init ISO uploaded and temporary ISO folder cleaned up successfully."
+  progress_substep "ISO uploaded and temp files cleaned up"
 }
 
 # Function to clone a VM from the template
 clone_vm() {
-  echo "Cloning template VM ($CPVM_TEMPLATE_VM_ID) to create VM ($VM_ID)..."
+  progress_substep "Cloning template ${CPVM_TEMPLATE_VM_ID}..."
   local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPVM_TEMPLATE_VM_ID/clone" \
     "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "newid=$VM_ID" \
@@ -182,12 +184,12 @@ clone_vm() {
 
   check_api_error "$response" "clone the VM"
 
-  echo "VM cloned successfully."
+  progress_substep "VM cloned successfully"
 }
 
 # Function to resize the VM disk
 resize_disk() {
-  echo "Resizing disk for VM $VM_ID..."
+  progress_substep "Resizing disk to ${CPVM_DISK_RESIZE}..."
   local response=$(curl_with_retries -X PUT "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/resize" \
     "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "disk=scsi0" \
@@ -204,12 +206,12 @@ resize_disk() {
     bail "$EXIT_API" "Error details: $response"
   fi
 
-  log_info "Disk resized successfully to $CPVM_DISK_RESIZE."
+  progress_substep "Disk resized to ${CPVM_DISK_RESIZE}"
 }
 
 # Function to attach the ISO to the VM
 attach_iso() {
-  echo "Attaching Cloud-Init ISO to VM $VM_ID..."
+  progress_substep "Attaching Cloud-Init ISO to VM..."
   local iso_filename="CI_${VM_ID}_${CPVM_VM_NAME}.iso"
   local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/config" \
     "${AUTH_HEADER_ARGS[@]}" \
@@ -219,7 +221,7 @@ attach_iso() {
 
   check_api_error "$response" "attach ISO to the VM"
 
-  echo "Cloud-Init ISO attached successfully."
+  progress_substep "ISO attached successfully"
 }
 
 # Main script execution
@@ -228,14 +230,32 @@ main() {
   parse_arguments "$@"
   validate_arguments
   init_curl_opts
+  
+  # Initialize progress tracking
+  init_progress 7
+  
+  progress_step "Authenticating to Proxmox API"
   init_auth
+  
+  progress_step "Finding available VM ID"
   get_available_vm_id
+  
+  progress_step "Creating Cloud-Init ISO"
   create_cloudinit_iso
+  
+  progress_step "Uploading Cloud-Init ISO"
   upload_iso
+  
+  progress_step "Cloning VM from template ${CPVM_TEMPLATE_ID}"
   clone_vm
+  
+  progress_step "Resizing disk"
   resize_disk
+  
+  progress_step "Attaching Cloud-Init ISO"
   attach_iso
-  log_info "VM creation and configuration completed successfully!"
+  
+  progress_complete "VM ${CPVM_NEW_ID} (${CPVM_NEW_NAME}) created successfully!"
 }
 
 # Run the main function

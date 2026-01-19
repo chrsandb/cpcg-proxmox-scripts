@@ -120,7 +120,7 @@ scp_qcow2_image() {
 
 # Function to create a new VM for the template
 create_vm() {
-  echo "Creating VM $CPMNGT_TEMPLATE_ID for the template..."
+  progress_substep "Creating VM configuration..."
   local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu" \
     "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "vmid=$CPMNGT_TEMPLATE_ID" \
@@ -138,12 +138,12 @@ create_vm() {
     echo "$error"
     exit 1
   fi
-  echo "VM created successfully."
+  progress_substep "VM created with ID ${CPMNGT_TEMPLATE_ID}"
 }
 
 # Function to wait for scsi0 disk to exist
 wait_for_scsi0_disk() {
-  echo "Waiting for scsi0 disk to be available for VM $CPMNGT_TEMPLATE_ID..."
+  progress_substep "Waiting for disk to be ready..."
   local timeout=120  # Timeout in seconds
   local interval=5   # Interval between checks
   local elapsed=0
@@ -156,7 +156,7 @@ wait_for_scsi0_disk() {
 
     local scsi0=$(get_jq_data "$response" '.data.scsi0')
     if [[ -n "$scsi0" ]]; then
-      log_info "scsi0 disk is available for VM $CPMNGT_TEMPLATE_ID."
+      log_debug "scsi0 disk is available for VM $CPMNGT_TEMPLATE_ID."
       return 0
     fi
 
@@ -169,7 +169,7 @@ wait_for_scsi0_disk() {
 
 # Function to import the QCOW2 image
 import_qcow2_image() {
-  echo "Importing QCOW2 image into the VM..."
+  progress_substep "Importing disk image..."
   local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPMNGT_TEMPLATE_ID/config" \
     "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "scsi0=$STORAGE_NAME_DISK:0,import-from=$CPMNGT_IMAGE_PATH$(basename "$CPMNGT_QCOW2_IMAGE")")
@@ -179,15 +179,16 @@ import_qcow2_image() {
   local upid=$(get_jq_data "$response" '.data')
   check_api_error "$response" "import QCOW2 image"
 
+  progress_substep "Waiting for import task to complete..."
   wait_for_task "$upid" "import_qcow2_image"
   wait_for_scsi0_disk  # Ensure scsi0 disk is ready before proceeding
 
-  echo "QCOW2 image imported successfully."
+  progress_substep "Disk image imported successfully"
 }
 
 # Function to configure the VM for templating
 configure_vm() {
-  echo "Configuring VM $CPMNGT_TEMPLATE_ID for template creation..."
+  progress_substep "Configuring VM settings..."
   local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPMNGT_TEMPLATE_ID/config" \
     "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "boot=order=scsi0" \
@@ -198,19 +199,19 @@ configure_vm() {
   debug_response "$response"
 
   check_api_error "$response" "configure the VM"
-  echo "VM configured successfully."
+  progress_substep "VM configuration applied"
 }
 
 # Function to convert the VM to a template
 convert_to_template() {
-  echo "Converting VM $CPMNGT_TEMPLATE_ID to a template..."
+  progress_substep "Converting VM to template..."
   local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPMNGT_TEMPLATE_ID/template" \
     "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
 
   check_api_error "$response" "convert VM to a template"
-  echo "VM converted to template successfully."
+  progress_substep "VM converted to template"
 }
 
 # Main script execution
@@ -219,13 +220,27 @@ main() {
   parse_arguments "$@"
   validate_arguments
   init_curl_opts
+  
+  # Initialize progress tracking
+  init_progress 5
+  
+  progress_step "Authenticating to Proxmox API"
   init_auth
+  
+  progress_step "Transferring QCOW2 image"
   scp_qcow2_image
+  
+  progress_step "Creating VM ${CPMNGT_TEMPLATE_ID}"
   create_vm
+  
+  progress_step "Importing QCOW2 image into VM"
   import_qcow2_image
+  
+  progress_step "Converting VM to template"
   configure_vm
   convert_to_template
-  log_info "Template creation completed successfully!"
+  
+  progress_complete "Management template ${CPMNGT_TEMPLATE_ID} (${CPMNGT_TEMPLATE_NAME}) created successfully!"
 }
 
 # Run the main function

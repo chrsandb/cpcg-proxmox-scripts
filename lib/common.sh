@@ -96,6 +96,59 @@ log_debug() {
   fi
 }
 
+# Progress tracking variables
+PROGRESS_TOTAL_STEPS=0
+PROGRESS_CURRENT_STEP=0
+
+# Initialize progress tracking
+init_progress() {
+  local total="$1"
+  PROGRESS_TOTAL_STEPS="$total"
+  PROGRESS_CURRENT_STEP=0
+}
+
+# Show progress step
+progress_step() {
+  local message="$1"
+  PROGRESS_CURRENT_STEP=$((PROGRESS_CURRENT_STEP + 1))
+  
+  local prefix="[${PROGRESS_CURRENT_STEP}/${PROGRESS_TOTAL_STEPS}]"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "${prefix} ${message}"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+}
+
+# Show sub-step (indented progress)
+progress_substep() {
+  local message="$1"
+  echo "  ↳ ${message}"
+}
+
+# Show completion message
+progress_complete() {
+  local message="$1"
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "✓ ${message}"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo ""
+}
+
+# Spinner for long-running operations
+show_spinner() {
+  local pid="$1"
+  local message="$2"
+  local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+  local i=0
+  
+  while kill -0 "$pid" 2>/dev/null; do
+    i=$(( (i+1) %10 ))
+    printf "\r  ${spin:$i:1} %s..." "$message"
+    sleep 0.1
+  done
+  printf "\r  ✓ %s\n" "$message"
+}
+
 handle_err() {
   local exit_code=$?
   local line=${1:-}
