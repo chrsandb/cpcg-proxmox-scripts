@@ -127,3 +127,101 @@ curl_with_retries() {
     fi
   done
 }
+
+debug_response() {
+  local response="$1"
+  if [[ "${DEBUG_MODE:-false}" == true ]]; then
+    local redacted="$response"
+    for secret in "$PVE_PASSWORD" "$PVE_TOKEN_SECRET" "$PVE_AUTH_COOKIE" "$CSRF_TOKEN"; do
+      if [[ -n "$secret" ]]; then
+        redacted=${redacted//"$secret"/"***REDACTED***"}
+      fi
+    done
+    log_debug "API Response: $(echo "$redacted" | jq . 2>/dev/null || echo "$redacted")"
+  fi
+}
+
+authenticate() {
+  log_info "Authenticating with Proxmox server..."
+  local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/access/ticket" \
+    --data-urlencode "username=$PVE_USER" \
+    --data-urlencode "password=$PVE_PASSWORD" \
+    -H "Content-Type: application/x-www-form-urlencoded")
+
+  debug_response "$response"
+
+  CSRF_TOKEN=$(echo "$response" | jq -r '.data.CSRFPreventionToken')
+  PVE_AUTH_COOKIE=$(echo "$response" | jq -r '.data.ticket')
+
+  if [[ -z "$CSRF_TOKEN" || -z "$PVE_AUTH_COOKIE" ]]; then
+    bail "$EXIT_API" "Authentication failed. Unable to retrieve CSRF token or auth cookie."
+  fi
+  log_info "Authentication successful."
+}
+
+init_auth() {
+  local auth_mode="${PVE_AUTH_MODE:-}"
+  if [[ -z "$auth_mode" ]]; then
+    if [[ -n "$PVE_TOKEN_ID" && -n "$PVE_TOKEN_SECRET" ]]; then
+      auth_mode="token"
+    else
+      auth_mode="password"
+    fi
+  fi
+
+  if [[ "$auth_mode" == "token" ]]; then
+    if [[ -z "$PVE_USER" || -z "$PVE_TOKEN_ID" || -z "$PVE_TOKEN_SECRET" ]]; then
+      bail "$EXIT_USER" "Token auth requires PVE_USER, PVE_TOKEN_ID, and PVE_TOKEN_SECRET."
+    fi
+    local token_id_full="$PVE_TOKEN_ID"
+    if [[ "$token_id_full" != *"!"* ]]; then
+      token_id_full="${PVE_USER}!${PVE_TOKEN_ID}"
+    fi
+    AUTH_HEADER_ARGS=(-H "Authorization: PVEAPIToken=${token_id_full}=${PVE_TOKEN_SECRET}")
+  else
+    if [[ -z "$PVE_PASSWORD" ]]; then
+      prompt_for_password
+    fi
+    authenticate
+    AUTH_HEADER_ARGS=(-H "CSRFPreventionToken: $CSRF_TOKEN" -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE")
+  fi
+}
+
+wait_for_task() {
+  local upid="$1"
+  local task_name="$2"
+  local timeout=${3:-300}
+  local interval=${4:-5}
+  local elapsed=0
+
+  if [[ -z "$upid" || "$upid" == "null" ]]; then
+    bail "$EXIT_API" "Missing task ID for ${task_name}."
+  fi
+
+  while (( elapsed < timeout )); do
+    local response=$(curl_with_retries -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/tasks/$upid/status" \
+      "${AUTH_HEADER_ARGS[@]}")
+
+    debug_response "$response"
+
+    local status=$(echo "$response" | jq -r '.data.status // empty')
+    local exitstatus=$(echo "$response" | jq -r '.data.exitstatus // empty')
+
+    if [[ "$status" == "stopped" ]]; then
+      if [[ "$exitstatus" != "OK" ]]; then
+        bail "$EXIT_API" "Task ${task_name} failed with status: ${exitstatus}"
+      fi
+      return 0
+    fi
+
+    sleep "$interval"
+    elapsed=$((elapsed + interval))
+  done
+
+  bail "$EXIT_SYSTEM" "Timeout waiting for task ${task_name} to complete."
+}
+
+prompt_for_password() {
+  read -s -p "Enter Proxmox password: " PVE_PASSWORD
+  echo
+}
