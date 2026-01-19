@@ -17,6 +17,9 @@ PROXMOX_API_URL=""
 CSRF_TOKEN=""
 PVE_AUTH_COOKIE=""
 AUTH_HEADER_ARGS=()
+DEBUG_MODE=false
+INSECURE_TLS=false
+CURL_OPTS=(-s)
 
 # Function to print the help text
 print_help() {
@@ -35,6 +38,8 @@ print_help() {
   echo "  --nics <Number of NICs>        Number of network interfaces (default: from .env CPGW_NICS)"
   echo "  --qcow2_image <QCOW2 File>     QCOW2 file path (default: from .env CPGW_QCOW2_IMAGE)"
   echo "  --copy-image                   Copy the QCOW2 file to the Proxmox server"
+  echo "  --ca-cert <Path>               Path to CA certificate for TLS validation (default: PVE_CACERT env)"
+  echo "  --insecure                     Allow insecure TLS (self-signed). Not recommended."
   echo "  --debug                        Print API responses for debugging to STDERR"
   echo "  -h, --help                     Show this help message"
 }
@@ -55,6 +60,8 @@ parse_arguments() {
       --nics) CPGW_NICS="$2"; shift; shift ;;
       --qcow2_image) CPGW_QCOW2_IMAGE="$2"; shift; shift ;;
       --copy-image) CPGW_COPY_IMAGE=true; shift ;;
+      --ca-cert) PVE_CACERT="$2"; shift; shift ;;
+      --insecure) INSECURE_TLS=true; shift ;;
       --debug) DEBUG_MODE=true; shift ;;
       -h|--help) print_help; exit 0 ;;
       *) echo "Unknown option: $1"; print_help; exit 1 ;;
@@ -85,10 +92,28 @@ validate_arguments() {
   PROXMOX_API_URL="https://$PVE_HOST:$PROXMOX_PORT/api2/json"
 }
 
+init_curl_opts() {
+  CURL_OPTS=(-s)
+
+  if [[ -n "$PVE_CACERT" ]]; then
+    CURL_OPTS+=("--cacert" "$PVE_CACERT")
+  fi
+
+  if [[ "$INSECURE_TLS" == true ]]; then
+    echo "Warning: TLS certificate validation disabled (--insecure). Use only in dev environments." >&2
+    CURL_OPTS+=("-k")
+  fi
+}
+
+prompt_for_password() {
+  read -s -p "Enter Proxmox password: " PVE_PASSWORD
+  echo
+}
+
 # Function to authenticate and retrieve CSRF token and auth cookie
 authenticate() {
   echo "Authenticating with Proxmox server..."
-  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/access/ticket" \
+  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/access/ticket" \
     --data-urlencode "username=$PVE_USER" \
     --data-urlencode "password=$PVE_PASSWORD" \
     -H "Content-Type: application/x-www-form-urlencoded")
@@ -128,8 +153,7 @@ init_auth() {
     AUTH_HEADER_ARGS=(-H "Authorization: PVEAPIToken=${token_id_full}=${PVE_TOKEN_SECRET}")
   else
     if [[ -z "$PVE_PASSWORD" ]]; then
-      echo "Error: Password auth requires PVE_PASSWORD."
-      exit 1
+      prompt_for_password
     fi
     authenticate
     AUTH_HEADER_ARGS=(-H "CSRFPreventionToken: $CSRF_TOKEN" -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE")
@@ -139,9 +163,15 @@ init_auth() {
 # Function to debug API responses
 debug_response() {
   local response="$1"
-  if $DEBUG_MODE; then
+  if [[ "$DEBUG_MODE" == true ]]; then
+    local redacted="$response"
+    for secret in "$PVE_PASSWORD" "$PVE_TOKEN_SECRET" "$PVE_AUTH_COOKIE" "$CSRF_TOKEN"; do
+      if [[ -n "$secret" ]]; then
+        redacted=${redacted//"$secret"/"***REDACTED***"}
+      fi
+    done
     echo "API Response:" >&2
-    echo "$response" | jq . >&2 || echo "$response" >&2
+    echo "$redacted" | jq . >&2 || echo "$redacted" >&2
   fi
 }
 
@@ -159,7 +189,7 @@ wait_for_task() {
   fi
 
   while (( elapsed < timeout )); do
-    local response=$(curl -s -k -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/tasks/$upid/status" \
+    local response=$(curl "${CURL_OPTS[@]}" -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/tasks/$upid/status" \
       "${AUTH_HEADER_ARGS[@]}")
 
     debug_response "$response"
@@ -211,7 +241,7 @@ create_vm() {
   local net_configs_str=$(IFS=" "; echo "${net_configs[*]}")
 
   # API call to create the VM
-  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu" \
+  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu" \
     "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "vmid=$CPGW_TEMPLATE_ID" \
     --data-urlencode "name=$CPGW_TEMPLATE_NAME" \
@@ -236,7 +266,7 @@ create_vm() {
 # Function to import the QCOW2 image
 import_qcow2_image() {
   echo "Importing QCOW2 image into the VM..."
-  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPGW_TEMPLATE_ID/config" \
+  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPGW_TEMPLATE_ID/config" \
     "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "scsi0=$STORAGE_NAME_DISK:0,import-from=$CPGW_IMAGE_PATH$(basename "$CPGW_QCOW2_IMAGE")")
 
@@ -259,7 +289,7 @@ import_qcow2_image() {
 # Function to configure the VM for templating
 configure_vm() {
   echo "Configuring VM $CPGW_TEMPLATE_ID for template creation..."
-  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPGW_TEMPLATE_ID/config" \
+  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPGW_TEMPLATE_ID/config" \
     "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "boot=order=scsi0" \
     --data-urlencode "serial0=socket" \
@@ -280,7 +310,7 @@ configure_vm() {
 # Function to convert the VM to a template
 convert_to_template() {
   echo "Converting VM $CPGW_TEMPLATE_ID to a template..."
-  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPGW_TEMPLATE_ID/template" \
+  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPGW_TEMPLATE_ID/template" \
     "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
@@ -302,7 +332,7 @@ wait_for_scsi0_disk() {
   local elapsed=0
 
   while (( elapsed < timeout )); do
-    local response=$(curl -s -k -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPGW_TEMPLATE_ID/config" \
+    local response=$(curl "${CURL_OPTS[@]}" -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPGW_TEMPLATE_ID/config" \
       "${AUTH_HEADER_ARGS[@]}")
 
     debug_response "$response"
@@ -325,6 +355,7 @@ wait_for_scsi0_disk() {
 main() {
   parse_arguments "$@"
   validate_arguments
+  init_curl_opts
   init_auth
   scp_qcow2_image
   create_vm

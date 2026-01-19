@@ -17,6 +17,9 @@ PROXMOX_API_URL=""
 CSRF_TOKEN=""
 PVE_AUTH_COOKIE=""
 AUTH_HEADER_ARGS=()
+DEBUG_MODE=false
+INSECURE_TLS=false
+CURL_OPTS=(-s)
 VM_ID=""
 
 # Function to print the help text
@@ -30,6 +33,8 @@ print_help() {
   echo "  --node <Node Name>             Proxmox node name (default: pve)"
   echo "  --storage <Storage Name>       Proxmox storage name for ISO upload (default: from .env STORAGE_NAME_ISO)"
   echo "  --vm-id <VM ID>                ID of the VM to delete (required)"
+  echo "  --ca-cert <Path>               Path to CA certificate for TLS validation (default: PVE_CACERT env)"
+  echo "  --insecure                     Allow insecure TLS (self-signed). Not recommended."
   echo "  --debug                        Print API responses for debugging to STDERR"
   echo "  -h, --help                     Show this help message"
 }
@@ -44,6 +49,8 @@ parse_arguments() {
       --node) NODE_NAME="$2"; shift; shift ;;
       --storage) STORAGE_NAME_ISO="$2"; shift; shift ;;
       --vm-id) VM_ID="$2"; shift; shift ;;
+      --ca-cert) PVE_CACERT="$2"; shift; shift ;;
+      --insecure) INSECURE_TLS=true; shift ;;
       --debug) DEBUG_MODE=true; shift ;;
       -h|--help) print_help; exit 0 ;;
       *) echo "Unknown option: $1"; print_help; exit 1 ;;
@@ -68,18 +75,33 @@ validate_arguments() {
   PROXMOX_API_URL="https://$PVE_HOST:$PROXMOX_PORT/api2/json"
 }
 
+init_curl_opts() {
+  CURL_OPTS=(-s)
+
+  if [[ -n "$PVE_CACERT" ]]; then
+    CURL_OPTS+=("--cacert" "$PVE_CACERT")
+  fi
+
+  if [[ "$INSECURE_TLS" == true ]]; then
+    echo "Warning: TLS certificate validation disabled (--insecure). Use only in dev environments." >&2
+    CURL_OPTS+=("-k")
+  fi
+}
+
+prompt_for_password() {
+  read -s -p "Enter Proxmox password: " PVE_PASSWORD
+  echo
+}
+
 # Function to authenticate and retrieve CSRF token and auth cookie
 authenticate() {
   echo "Authenticating with Proxmox server..."
-  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/access/ticket" \
+  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/access/ticket" \
     --data-urlencode "username=$PVE_USER" \
     --data-urlencode "password=$PVE_PASSWORD" \
     -H "Content-Type: application/x-www-form-urlencoded")
 
-  if $DEBUG_MODE; then
-    echo "Authentication Response:" >&2
-    echo "$response" | jq . >&2 || echo "$response" >&2
-  fi
+  debug_response "$response"
 
   CSRF_TOKEN=$(echo "$response" | jq -r '.data.CSRFPreventionToken')
   PVE_AUTH_COOKIE=$(echo "$response" | jq -r '.data.ticket')
@@ -114,8 +136,7 @@ init_auth() {
     AUTH_HEADER_ARGS=(-H "Authorization: PVEAPIToken=${token_id_full}=${PVE_TOKEN_SECRET}")
   else
     if [[ -z "$PVE_PASSWORD" ]]; then
-      echo "Error: Password auth requires PVE_PASSWORD."
-      exit 1
+      prompt_for_password
     fi
     authenticate
     AUTH_HEADER_ARGS=(-H "CSRFPreventionToken: $CSRF_TOKEN" -H "Cookie: PVEAuthCookie=$PVE_AUTH_COOKIE")
@@ -125,16 +146,22 @@ init_auth() {
 # Function to debug API responses
 debug_response() {
   local response="$1"
-  if $DEBUG_MODE; then
+  if [[ "$DEBUG_MODE" == true ]]; then
+    local redacted="$response"
+    for secret in "$PVE_PASSWORD" "$PVE_TOKEN_SECRET" "$PVE_AUTH_COOKIE" "$CSRF_TOKEN"; do
+      if [[ -n "$secret" ]]; then
+        redacted=${redacted//"$secret"/"***REDACTED***"}
+      fi
+    done
     echo "API Response:" >&2
-    echo "$response" | jq . >&2 || echo "$response" >&2
+    echo "$redacted" | jq . >&2 || echo "$redacted" >&2
   fi
 }
 
 # Function to check if the VM exists
 check_vm_exists() {
   echo "Checking if VM $VM_ID exists..."
-  local response=$(curl -s -k -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/current" \
+  local response=$(curl "${CURL_OPTS[@]}" -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/current" \
     "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
@@ -150,7 +177,7 @@ check_vm_exists() {
 # Function to retrieve the VM name
 get_vm_name() {
   echo "Retrieving name for VM $VM_ID..."
-  local response=$(curl -s -k -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/config" \
+  local response=$(curl "${CURL_OPTS[@]}" -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/config" \
     "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
@@ -168,7 +195,7 @@ get_vm_name() {
 # Function to hard stop a VM
 stop_vm() {
   echo "Stopping VM $VM_ID..."
-  local response=$(curl -s -k -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/stop" \
+  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/stop" \
     "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
@@ -182,7 +209,7 @@ stop_vm() {
 
   echo "Waiting for VM $VM_ID to stop..."
   while true; do
-    local status_response=$(curl -s -k -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/current" \
+    local status_response=$(curl "${CURL_OPTS[@]}" -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/current" \
       "${AUTH_HEADER_ARGS[@]}")
     local vm_status=$(echo "$status_response" | jq -r '.data.status')
 
@@ -198,7 +225,7 @@ stop_vm() {
 # Function to delete a VM
 delete_vm() {
   echo "Deleting VM $VM_ID..."
-  local response=$(curl -s -k -X DELETE "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID" \
+  local response=$(curl "${CURL_OPTS[@]}" -X DELETE "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID" \
     "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
@@ -217,7 +244,7 @@ delete_vm() {
 delete_iso() {
   local iso_filename="CI_${VM_ID}_${VM_NAME}.iso"
   echo "Deleting ISO $iso_filename from storage $STORAGE_NAME_ISO..."
-  local response=$(curl -s -k -X DELETE "$PROXMOX_API_URL/nodes/$NODE_NAME/storage/$STORAGE_NAME_ISO/content/$STORAGE_NAME_ISO:iso/$iso_filename" \
+  local response=$(curl "${CURL_OPTS[@]}" -X DELETE "$PROXMOX_API_URL/nodes/$NODE_NAME/storage/$STORAGE_NAME_ISO/content/$STORAGE_NAME_ISO:iso/$iso_filename" \
     "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
@@ -236,6 +263,7 @@ delete_iso() {
 main() {
   parse_arguments "$@"
   validate_arguments
+  init_curl_opts
   init_auth
   check_vm_exists
   get_vm_name
