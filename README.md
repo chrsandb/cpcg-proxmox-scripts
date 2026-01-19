@@ -227,6 +227,11 @@ If `PVE_PASSWORD` is not provided, the scripts will securely prompt for it at ru
 - Disk resize values must match `+<number>[G|M]` (e.g., `+10G`).
 - File paths (e.g., `--user-data`, QCOW2 images) must exist and be readable when required.
 
+### Reliability / Retries
+
+- All Proxmox API calls run through a retry wrapper with exponential backoff.
+- Defaults: `CURL_MAX_RETRIES=3`, `CURL_BACKOFF_INITIAL=2s`, `CURL_BACKOFF_MAX=30s` (override via env vars).
+
 `PVE_TOKEN_ID` can be either the token name (e.g., `mytoken`) or the full token ID (e.g., `root@pam!mytoken`).
 API token authentication has not been tested in this repository yet.
 

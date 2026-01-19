@@ -10,6 +10,9 @@ set -o pipefail
 EXIT_USER=1
 EXIT_SYSTEM=2
 EXIT_API=3
+CURL_MAX_RETRIES=${CURL_MAX_RETRIES:-3}
+CURL_BACKOFF_INITIAL=${CURL_BACKOFF_INITIAL:-2}
+CURL_BACKOFF_MAX=${CURL_BACKOFF_MAX:-30}
 
 bail() {
   local code="$1"; shift
@@ -96,4 +99,31 @@ handle_exit() {
 setup_traps() {
   trap 'handle_exit' EXIT
   trap 'handle_err $LINENO' ERR
+}
+
+curl_with_retries() {
+  local attempt=1
+  local delay="$CURL_BACKOFF_INITIAL"
+  local output
+  while true; do
+    output=$(curl "${CURL_OPTS[@]}" "$@")
+    local status=$?
+    if [[ $status -eq 0 ]]; then
+      echo "$output"
+      return 0
+    fi
+
+    if (( attempt >= CURL_MAX_RETRIES )); then
+      log_error "curl failed after ${attempt} attempts (status ${status})"
+      return $status
+    fi
+
+    log_warn "curl failed (status ${status}), retrying in ${delay}s... (${attempt}/${CURL_MAX_RETRIES})"
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+    if (( delay > CURL_BACKOFF_MAX )); then
+      delay=$CURL_BACKOFF_MAX
+    fi
+  done
 }

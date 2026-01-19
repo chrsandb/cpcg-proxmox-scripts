@@ -100,7 +100,7 @@ prompt_for_password() {
 # Function to authenticate and retrieve CSRF token and auth cookie
 authenticate() {
   echo "Authenticating with Proxmox server..."
-  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/access/ticket" \
+local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/access/ticket" \
     --data-urlencode "username=$PVE_USER" \
     --data-urlencode "password=$PVE_PASSWORD" \
     -H "Content-Type: application/x-www-form-urlencoded")
@@ -165,7 +165,7 @@ debug_response() {
 # Function to check if the VM exists
 check_vm_exists() {
   echo "Checking if VM $VM_ID exists..."
-  local response=$(curl "${CURL_OPTS[@]}" -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/current" \
+  local response=$(curl_with_retries -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/current" \
     "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
@@ -181,7 +181,7 @@ check_vm_exists() {
 # Function to retrieve the VM name
 get_vm_name() {
   echo "Retrieving name for VM $VM_ID..."
-  local response=$(curl "${CURL_OPTS[@]}" -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/config" \
+  local response=$(curl_with_retries -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/config" \
     "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
@@ -199,7 +199,7 @@ get_vm_name() {
 # Function to hard stop a VM
 stop_vm() {
   echo "Stopping VM $VM_ID..."
-  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/stop" \
+  local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/stop" \
     "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
@@ -213,7 +213,7 @@ stop_vm() {
 
   echo "Waiting for VM $VM_ID to stop..."
   while true; do
-    local status_response=$(curl "${CURL_OPTS[@]}" -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/current" \
+    local status_response=$(curl_with_retries -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/current" \
       "${AUTH_HEADER_ARGS[@]}")
     local vm_status=$(echo "$status_response" | jq -r '.data.status')
 
@@ -229,7 +229,7 @@ stop_vm() {
 # Function to delete a VM
 delete_vm() {
   echo "Deleting VM $VM_ID..."
-  local response=$(curl "${CURL_OPTS[@]}" -X DELETE "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID" \
+  local response=$(curl_with_retries -X DELETE "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID" \
     "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
@@ -248,7 +248,7 @@ delete_vm() {
 delete_iso() {
   local iso_filename="CI_${VM_ID}_${VM_NAME}.iso"
   echo "Deleting ISO $iso_filename from storage $STORAGE_NAME_ISO..."
-  local response=$(curl "${CURL_OPTS[@]}" -X DELETE "$PROXMOX_API_URL/nodes/$NODE_NAME/storage/$STORAGE_NAME_ISO/content/$STORAGE_NAME_ISO:iso/$iso_filename" \
+  local response=$(curl_with_retries -X DELETE "$PROXMOX_API_URL/nodes/$NODE_NAME/storage/$STORAGE_NAME_ISO/content/$STORAGE_NAME_ISO:iso/$iso_filename" \
     "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"

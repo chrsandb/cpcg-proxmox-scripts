@@ -118,7 +118,7 @@ prompt_for_password() {
 # Function to authenticate and retrieve CSRF token and auth cookie
 authenticate() {
   echo "Authenticating with Proxmox server..."
-  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/access/ticket" \
+  local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/access/ticket" \
     --data-urlencode "username=$PVE_USER" \
     --data-urlencode "password=$PVE_PASSWORD" \
     -H "Content-Type: application/x-www-form-urlencoded")
@@ -194,7 +194,7 @@ wait_for_task() {
   fi
 
   while (( elapsed < timeout )); do
-    local response=$(curl "${CURL_OPTS[@]}" -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/tasks/$upid/status" \
+    local response=$(curl_with_retries -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/tasks/$upid/status" \
       "${AUTH_HEADER_ARGS[@]}")
 
     debug_response "$response"
@@ -246,7 +246,7 @@ create_vm() {
   local net_configs_str=$(IFS=" "; echo "${net_configs[*]}")
 
   # API call to create the VM
-  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu" \
+  local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu" \
     "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "vmid=$CPGW_TEMPLATE_ID" \
     --data-urlencode "name=$CPGW_TEMPLATE_NAME" \
@@ -271,7 +271,7 @@ create_vm() {
 # Function to import the QCOW2 image
 import_qcow2_image() {
   echo "Importing QCOW2 image into the VM..."
-  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPGW_TEMPLATE_ID/config" \
+  local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPGW_TEMPLATE_ID/config" \
     "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "scsi0=$STORAGE_NAME_DISK:0,import-from=$CPGW_IMAGE_PATH$(basename "$CPGW_QCOW2_IMAGE")")
 
@@ -294,7 +294,7 @@ import_qcow2_image() {
 # Function to configure the VM for templating
 configure_vm() {
   echo "Configuring VM $CPGW_TEMPLATE_ID for template creation..."
-  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPGW_TEMPLATE_ID/config" \
+  local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPGW_TEMPLATE_ID/config" \
     "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "boot=order=scsi0" \
     --data-urlencode "serial0=socket" \
@@ -315,7 +315,7 @@ configure_vm() {
 # Function to convert the VM to a template
 convert_to_template() {
   echo "Converting VM $CPGW_TEMPLATE_ID to a template..."
-  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPGW_TEMPLATE_ID/template" \
+  local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPGW_TEMPLATE_ID/template" \
     "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
@@ -337,7 +337,7 @@ wait_for_scsi0_disk() {
   local elapsed=0
 
   while (( elapsed < timeout )); do
-    local response=$(curl "${CURL_OPTS[@]}" -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPGW_TEMPLATE_ID/config" \
+    local response=$(curl_with_retries -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPGW_TEMPLATE_ID/config" \
       "${AUTH_HEADER_ARGS[@]}")
 
     debug_response "$response"

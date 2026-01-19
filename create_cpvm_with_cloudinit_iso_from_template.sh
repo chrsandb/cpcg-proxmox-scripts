@@ -116,7 +116,7 @@ prompt_for_password() {
 # Function to authenticate and retrieve CSRF token and auth cookie
 authenticate() {
   echo "Authenticating with Proxmox server..."
-  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/access/ticket" \
+local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/access/ticket" \
     --data-urlencode "username=$PVE_USER" \
     --data-urlencode "password=$PVE_PASSWORD" \
     -H "Content-Type: application/x-www-form-urlencoded")
@@ -185,7 +185,7 @@ get_available_vm_id() {
   local current_id=$CPVM_VM_ID_START
 
   while (( attempts < max_attempts )); do
-    local response=$(curl "${CURL_OPTS[@]}" -X GET "$PROXMOX_API_URL/cluster/nextid?vmid=$current_id" \
+    local response=$(curl_with_retries -X GET "$PROXMOX_API_URL/cluster/nextid?vmid=$current_id" \
       "${AUTH_HEADER_ARGS[@]}")
 
     debug_response "$response"
@@ -229,7 +229,7 @@ create_cloudinit_iso() {
 upload_iso() {
   local iso_filename="CI_${VM_ID}_${CPVM_VM_NAME}.iso"
   echo "Uploading Cloud-Init ISO ($iso_filename) to Proxmox storage ($STORAGE_NAME_ISO)..."
-  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/storage/$STORAGE_NAME_ISO/upload" \
+  local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/storage/$STORAGE_NAME_ISO/upload" \
     "${AUTH_HEADER_ARGS[@]}" \
     -F "content=iso" \
     -F "filename=@$CPVM_TEMP_ISO_DIR/$iso_filename")
@@ -250,7 +250,7 @@ upload_iso() {
 # Function to clone a VM from the template
 clone_vm() {
   echo "Cloning template VM ($CPVM_TEMPLATE_VM_ID) to create VM ($VM_ID)..."
-  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPVM_TEMPLATE_VM_ID/clone" \
+  local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$CPVM_TEMPLATE_VM_ID/clone" \
     "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "newid=$VM_ID" \
     --data-urlencode "name=$CPVM_VM_NAME")
@@ -270,7 +270,7 @@ clone_vm() {
 # Function to resize the VM disk
 resize_disk() {
   echo "Resizing disk for VM $VM_ID..."
-  local response=$(curl "${CURL_OPTS[@]}" -X PUT "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/resize" \
+  local response=$(curl_with_retries -X PUT "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/resize" \
     "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "disk=scsi0" \
     --data-urlencode "size=$CPVM_DISK_RESIZE")
@@ -294,7 +294,7 @@ resize_disk() {
 attach_iso() {
   echo "Attaching Cloud-Init ISO to VM $VM_ID..."
   local iso_filename="CI_${VM_ID}_${CPVM_VM_NAME}.iso"
-  local response=$(curl "${CURL_OPTS[@]}" -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/config" \
+  local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/config" \
     "${AUTH_HEADER_ARGS[@]}" \
     --data-urlencode "ide2=$STORAGE_NAME_ISO:iso/$iso_filename,media=cdrom")
 
