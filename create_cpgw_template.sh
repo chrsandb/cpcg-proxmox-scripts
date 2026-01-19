@@ -24,6 +24,7 @@ AUTH_HEADER_ARGS=()
 DEBUG_MODE=false
 INSECURE_TLS=false
 CURL_OPTS=(-s)
+CPGW_SKIP_BRIDGE_INDEXES=""
 
 # Function to print the help text
 print_help() {
@@ -40,6 +41,7 @@ print_help() {
   echo "  --cores <Cores>                Number of CPU cores (default: from .env CPGW_CORES)"
   echo "  --memory <Memory>              Memory size in MB (default: from .env CPGW_MEMORY)"
   echo "  --nics <Number of NICs>        Number of network interfaces (default: from .env CPGW_NICS)"
+  echo "  --skip-bridge-indexes <Indexes> Comma-separated bridge indexes to skip (e.g., '1,3')"
   echo "  --qcow2_image <QCOW2 File>     QCOW2 file path (default: from .env CPGW_QCOW2_IMAGE)"
   echo "  --copy-image                   Copy the QCOW2 file to the Proxmox server"
   echo "  --ca-cert <Path>               Path to CA certificate for TLS validation (default: PVE_CACERT env)"
@@ -62,6 +64,7 @@ parse_arguments() {
       --cores) CPGW_CORES="$2"; shift; shift ;;
       --memory) CPGW_MEMORY="$2"; shift; shift ;;
       --nics) CPGW_NICS="$2"; shift; shift ;;
+      --skip-bridge-indexes) CPGW_SKIP_BRIDGE_INDEXES="$2"; shift; shift ;;
       --qcow2_image) CPGW_QCOW2_IMAGE="$2"; shift; shift ;;
       --copy-image) CPGW_COPY_IMAGE=true; shift ;;
       --ca-cert) PVE_CACERT="$2"; shift; shift ;;
@@ -110,6 +113,22 @@ init_curl_opts() {
   fi
 }
 
+should_skip_bridge_index() {
+  local index="$1"
+  local skip_list="$CPGW_SKIP_BRIDGE_INDEXES"
+
+  if [[ -z "$skip_list" ]]; then
+    return 1  # Don't skip
+  fi
+
+  # Check if index is in the skip list (comma-separated)
+  if [[ ",${skip_list}," == *",${index},"* ]]; then
+    return 0  # Skip this index
+  fi
+
+  return 1  # Don't skip
+}
+
 # Function to SCP the QCOW2 file
 scp_qcow2_image() {
   if $CPGW_COPY_IMAGE; then
@@ -124,8 +143,14 @@ create_vm() {
 
   # Build network interface configurations dynamically
   local net_configs=()
+  local net_index=0
   for ((i = 0; i < CPGW_NICS; i++)); do
-    net_configs+=("--data-urlencode net$i=virtio,bridge=${CPGW_BRIDGE_BASE}$i")
+    if should_skip_bridge_index "$i"; then
+      log_debug "Skipping bridge index $i"
+      continue
+    fi
+    net_configs+=("--data-urlencode net${net_index}=virtio,bridge=${CPGW_BRIDGE_BASE}$i")
+    net_index=$((net_index + 1))
   done
 
   # Join network configurations into a single string for the curl command
@@ -145,7 +170,10 @@ create_vm() {
 
   check_api_error "$response" "create VM"
 
-  echo "VM created successfully with $CPGW_NICS network interfaces."
+  echo "VM created successfully."
+  if [[ -n "$CPGW_SKIP_BRIDGE_INDEXES" ]]; then
+    echo "  (Skipped bridge indexes: $CPGW_SKIP_BRIDGE_INDEXES)"
+  fi
 }
 
 # Function to import the QCOW2 image

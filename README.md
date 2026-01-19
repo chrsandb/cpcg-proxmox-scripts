@@ -152,6 +152,29 @@ All scripts load defaults from `.env` and allow CLI flags to override them.
 
 ## Examples
 
+### Skip Bridge Indexes (Gateway Template Only)
+
+The `create_cpgw_template.sh` script supports selective bridge configuration when creating gateway templates. Use the `--skip-bridge-indexes` option to exclude specific bridge indexes from the network configuration.
+
+**Syntax**: Comma-separated list of zero-indexed bridge numbers to skip  
+**Example**: `--skip-bridge-indexes "1,3"` skips bridges 1 and 3
+
+**Usage Example**:
+```bash
+./create_cpgw_template.sh \
+  --password "secure-password" \
+  --host "192.168.1.12" \
+  --template-name "cp-gateway-template" \
+  --qcow2_image "/path/to/gateway.qcow2" \
+  --copy-image \
+  --cores 8 \
+  --memory 8192 \
+  --nics 4 \
+  --skip-bridge-indexes "1,3"
+```
+
+This example creates a 4-NIC gateway template but only configures bridges 0 and 2 (skipping 1 and 3).
+
 ### Create Gateway Template
 ```bash
 ./create_cpgw_template.sh \
