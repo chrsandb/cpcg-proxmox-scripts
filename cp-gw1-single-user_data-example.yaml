@@ -1,0 +1,69 @@
+#cloud-config
+hostname: cpgw1
+ssh_authorized_keys:
+  - ssh-ed25519 AAbbC3NzaC2lZDI1NTE9AAAAIKd6H4SXIeUSz9X/v+6LR71QLpgkHl0LJgLrHgAyJeFY user@lab.local
+clish:
+  - set user admin shell /bin/bash
+  - set expert-password-hash $6$d.3FaEIc8LPvQBXT$BOXUenIikSnaiTVvMHYtHlBEcimcRRMAHGV3MB2TXD.Quv3/W2iraW0xmuFqG7z8N1aTTKOnpfcf8v2gjFjmH1
+  - set ipv6-state on
+  - save config
+runcmd:
+  - curl_cli -sk https://raw.githubusercontent.com/alexgit2k/qemu-guest-agent-static/refs/heads/master/qemu-ga-static-3.1.0-1.x86_64.rpm >/tmp/install.rpm ; rpm -i /tmp/install.rpm ; rm /tmp/install.rpm
+  - sed -i 's/ttyS0/ttyS1/g' /usr/local/etc/qemu/qemu-ga.conf
+  - service qemu-ga restart
+  - curl_cli -sk https://vault.centos.org/5.2/os/i386/CentOS/screen-4.0.3-1.el5.i386.rpm >/tmp/install.rpm ; rpm -i --nodeps --nosignature /tmp/install.rpm ; rm /tmp/install.rpm
+  - curl_cli -sk https://vault.centos.org/5.2/os/i386/CentOS/joe-3.4-3.i386.rpm >/tmp/install.rpm ; rpm -i --nodeps --nosignature /tmp/install.rpm ; rm /tmp/install.rpm
+  - curl_cli -sk https://vault.centos.org/5.2/os/i386/CentOS/unzip-5.52-2.2.1.i386.rpm >/tmp/install.rpm ; rpm -i --nodeps --noscripts --nosignature /tmp/install.rpm ; rm /tmp/install.rpm
+  - curl_cli -sk https://vault.centos.org/5.2/os/i386/CentOS/zip-2.31-1.2.2.i386.rpm >/tmp/install.rpm ; rpm -i --nodeps --noscripts --nosignature /tmp/install.rpm ; rm /tmp/install.rpm
+  - curl_cli -sk https://vault.centos.org/5.2/os/i386/CentOS/wget-1.10.2-7.el5.i386.rpm >/tmp/install.rpm ; rpm -i --nodeps --noscripts --nosignature /tmp/install.rpm ; rm /tmp/install.rpm
+  - cd /lib ; ln -s libcpopenssl.so.1.1 libssl.so.6 ; ln -s libcpopenssl.so.1.1 libcrypto.so.6 ; cd -
+config_system:
+  domainname: lab.local
+  timezone: Europe/Paris
+  ftw_sic_key: vpn123
+  install_security_gw: true
+  install_security_managment: false
+  admin_hash: $6$d.3FaEIc8LPvQBXT$BOXUenIikSnaiTVvMHYtHlBEcimcRRMAHGV3MB2TXD.Quv3/W2iraW0xmuFqG7z8N1aTTKOnpfcf8v2gjFjmH1
+  maintenance_hash: grub.pbkdf2.sha512.10000.7029FEDE3AD7F3628EAF19C1720D82D07865F1813BC483102573E652FB7E39DBF6E2AEC997185E9FFD134AEABDB2AE725F62DDB578CAEE2B693A7AA1AF872AC0.96E2B7A9D82276A0614D5B4259B6E7DEEAD29CBFAF5F9C48A7267213BEF946FF8F54E440E82F9AB2B09179868931E8C4B1525E33D3B742483076EA3378996B55
+  download_info: true
+  upload_info: true
+  upload_crash_data: false
+  reboot_if_required: true
+ntp:
+  enabled: true
+  servers:
+    - ntp.checkpoint.com
+    - ntp2.checkpoint.com
+network:
+  version: 1
+  config:
+    - type: physical
+      name: eth0
+      mtu: 1500
+      subnets:
+        - type: static
+          address: 192.168.1.25
+          netmask: 255.255.255.0
+          gateway: 192.168.1.1
+          dns_nameservers: [192.168.1.1, 8.8.8.8, 8.8.4.4]
+    - type: physical
+      name: eth1
+      mtu: 1500
+      subnets:
+        - type: static
+          address: 192.168.101.1
+          netmask: 255.255.255.0
+    - type: physical
+      name: eth2
+      mtu: 1500
+      subnets:
+        - type: static
+          address: 192.168.102.1
+          netmask: 255.255.255.0
+    - type: physical
+      name: eth1
+      mtu: 1500
+      subnets:
+        - type: static
+          address: 192.168.102.1
+          netmask: 255.255.255.0
