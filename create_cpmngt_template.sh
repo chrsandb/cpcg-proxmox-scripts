@@ -183,12 +183,7 @@ import_qcow2_image() {
   debug_response "$response"
 
   local upid=$(echo "$response" | jq -r '.data // empty')
-  local error=$(echo "$response" | jq -r '.errors // empty')
-  if [[ -n "$error" ]]; then
-    echo "Error: Failed to import QCOW2 image. Error details:"
-    echo "$error"
-    exit 1
-  fi
+  check_api_error "$response" "import QCOW2 image"
 
   wait_for_task "$upid" "import_qcow2_image"
   wait_for_scsi0_disk  # Ensure scsi0 disk is ready before proceeding
@@ -208,12 +203,7 @@ configure_vm() {
 
   debug_response "$response"
 
-  local error=$(echo "$response" | jq -r '.errors // empty')
-  if [[ -n "$error" ]]; then
-    echo "Error: Failed to configure the VM. Error details:"
-    echo "$error"
-    exit 1
-  fi
+  check_api_error "$response" "configure the VM"
   echo "VM configured successfully."
 }
 
@@ -225,12 +215,7 @@ convert_to_template() {
 
   debug_response "$response"
 
-  local error=$(echo "$response" | jq -r '.errors // empty')
-  if [[ -n "$error" ]]; then
-    echo "Error: Failed to convert VM to a template. Error details:"
-    echo "$error"
-    exit 1
-  fi
+  check_api_error "$response" "convert VM to a template"
   echo "VM converted to template successfully."
 }
 

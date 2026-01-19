@@ -164,12 +164,7 @@ upload_iso() {
 
   debug_response "$response"
 
-  local error=$(echo "$response" | jq -r '.errors // empty')
-  if [[ $? -ne 0 || -n "$error" ]]; then
-    echo "Error: Failed to upload Cloud-Init ISO. Error details:"
-    echo "$error"
-    exit 1
-  fi
+  check_api_error "$response" "upload the ISO"
 
   rm -rf "$CPVM_TEMP_ISO_DIR"
   echo "Cloud-Init ISO uploaded and temporary ISO folder cleaned up successfully."
@@ -185,12 +180,7 @@ clone_vm() {
 
   debug_response "$response"
 
-  local error=$(echo "$response" | jq -r '.errors // empty')
-  if [[ -n "$error" ]]; then
-    echo "Error: Failed to clone the VM. Error details:"
-    echo "$error"
-    exit 1
-  fi
+  check_api_error "$response" "clone the VM"
 
   echo "VM cloned successfully."
 }
@@ -228,12 +218,7 @@ attach_iso() {
 
   debug_response "$response"
 
-  local error=$(echo "$response" | jq -r '.errors // empty')
-  if [[ -n "$error" ]]; then
-    echo "Error: Failed to attach ISO to the VM. Error details:"
-    echo "$error"
-    exit 1
-  fi
+  check_api_error "$response" "attach ISO to the VM"
 
   echo "Cloud-Init ISO attached successfully."
 }

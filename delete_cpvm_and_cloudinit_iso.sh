@@ -139,12 +139,7 @@ stop_vm() {
 
   debug_response "$response"
 
-  local error=$(echo "$response" | jq -r '.errors // empty')
-  if [[ $? -ne 0 || -n "$error" ]]; then
-    echo "Error: Failed to stop the VM. Error details:"
-    echo "$error"
-    exit 1
-  fi
+  check_api_error "$response" "stop the VM"
 
   echo "Waiting for VM $VM_ID to stop..."
   while true; do
@@ -169,12 +164,7 @@ delete_vm() {
 
   debug_response "$response"
 
-  local error=$(echo "$response" | jq -r '.errors // empty')
-  if [[ $? -ne 0 || -n "$error" ]]; then
-    echo "Error: Failed to delete the VM. Error details:"
-    echo "$error"
-    exit 1
-  fi
+  check_api_error "$response" "delete the VM"
 
   echo "VM $VM_ID deleted successfully."
 }
@@ -188,12 +178,7 @@ delete_iso() {
 
   debug_response "$response"
 
-  local error=$(echo "$response" | jq -r '.errors // empty')
-  if [[ $? -ne 0 || -n "$error" ]]; then
-    echo "Error: Failed to delete the ISO. Error details:"
-    echo "$error"
-    exit 1
-  fi
+  check_api_error "$response" "delete the ISO"
 
   echo "ISO $iso_filename deleted successfully."
 }

@@ -64,6 +64,19 @@ require_file_readable() {
   fi
 }
 
+check_api_error() {
+  local response="$1"
+  local action="$2"
+  local exit_code="${3:-$EXIT_API}"
+
+  local error=$(echo "$response" | jq -r '.errors // empty')
+  if [[ -n "$error" ]]; then
+    log_error "Failed to ${action}."
+    log_error "Error details: $error"
+    exit "$exit_code"
+  fi
+}
+
 script_timestamp() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
 }
