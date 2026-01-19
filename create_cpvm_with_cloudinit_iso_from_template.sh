@@ -13,6 +13,10 @@ load_env() {
 
 load_env
 
+SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+
 PROXMOX_API_URL=""
 CSRF_TOKEN=""
 PVE_AUTH_COOKIE=""
@@ -102,7 +106,7 @@ init_curl_opts() {
   fi
 
   if [[ "$INSECURE_TLS" == true ]]; then
-    echo "Warning: TLS certificate validation disabled (--insecure). Use only in dev environments." >&2
+    log_warn "TLS certificate validation disabled (--insecure). Use only in dev environments."
     CURL_OPTS+=("-k")
   fi
 }
@@ -311,6 +315,7 @@ attach_iso() {
 
 # Main script execution
 main() {
+  setup_traps
   parse_arguments "$@"
   validate_arguments
   init_curl_opts
@@ -321,7 +326,7 @@ main() {
   clone_vm
   resize_disk
   attach_iso
-  echo "VM creation and configuration completed successfully!"
+  log_info "VM creation and configuration completed successfully!"
 }
 
 # Run the main function

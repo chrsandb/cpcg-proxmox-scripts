@@ -214,6 +214,12 @@ You can authenticate with either username/password (default) or an API token.
 
 If `PVE_PASSWORD` is not provided, the scripts will securely prompt for it at runtime to avoid exposing credentials in process arguments.
 
+### Logging & Error Handling
+
+- All scripts emit timestamped log lines to stderr; success messages are logged at `INFO` level.
+- `--debug` preserves structured API responses while redacting secrets.
+- Traps are registered for `ERR`/`EXIT` to surface unexpected errors early and allow future cleanup hooks.
+
 `PVE_TOKEN_ID` can be either the token name (e.g., `mytoken`) or the full token ID (e.g., `root@pam!mytoken`).
 API token authentication has not been tested in this repository yet.
 

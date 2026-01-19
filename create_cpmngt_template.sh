@@ -13,6 +13,10 @@ load_env() {
 
 load_env
 
+SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+
 PROXMOX_API_URL=""
 CSRF_TOKEN=""
 PVE_AUTH_COOKIE=""
@@ -100,7 +104,7 @@ init_curl_opts() {
   fi
 
   if [[ "$INSECURE_TLS" == true ]]; then
-    echo "Warning: TLS certificate validation disabled (--insecure). Use only in dev environments." >&2
+    log_warn "TLS certificate validation disabled (--insecure). Use only in dev environments."
     CURL_OPTS+=("-k")
   fi
 }
@@ -341,6 +345,7 @@ convert_to_template() {
 
 # Main script execution
 main() {
+  setup_traps
   parse_arguments "$@"
   validate_arguments
   init_curl_opts
@@ -350,7 +355,7 @@ main() {
   import_qcow2_image
   configure_vm
   convert_to_template
-  echo "Template creation completed successfully!"
+  log_info "Template creation completed successfully!"
 }
 
 # Run the main function
