@@ -238,3 +238,84 @@ prompt_for_password() {
   read -rs -p "Enter Proxmox password: " PVE_PASSWORD
   echo
 }
+
+get_jq_data() {
+  local response="$1"
+  local path="$2"
+  echo "$response" | jq -r "$path // empty"
+}
+
+check_vm_exists() {
+  local vm_id="$1"
+  local action="${2:-check if VM exists}"
+
+  local response=$(curl_with_retries -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$vm_id/status/current" \
+    "${AUTH_HEADER_ARGS[@]}")
+
+  debug_response "$response"
+
+  local vm_status=$(get_jq_data "$response" '.data.status')
+  if [[ -z "$vm_status" || "$vm_status" == "null" ]]; then
+    bail "$EXIT_API" "VM $vm_id does not exist."
+  fi
+
+  log_debug "VM $vm_id exists with status: $vm_status"
+  echo "$vm_status"
+}
+
+get_vm_name() {
+  local vm_id="$1"
+
+  local response=$(curl_with_retries -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$vm_id/config" \
+    "${AUTH_HEADER_ARGS[@]}")
+
+  debug_response "$response"
+
+  local vm_name=$(get_jq_data "$response" '.data.name')
+  if [[ -z "$vm_name" || "$vm_name" == "null" ]]; then
+    bail "$EXIT_API" "Unable to retrieve name for VM $vm_id."
+  fi
+
+  log_debug "VM $vm_id has name: $vm_name"
+  echo "$vm_name"
+}
+
+wait_for_vm_status() {
+  local vm_id="$1"
+  local target_status="$2"
+  local timeout_secs="${3:-300}"
+
+  local elapsed=0
+  local interval=2
+
+  while (( elapsed < timeout_secs )); do
+    local response=$(curl_with_retries -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$vm_id/status/current" \
+      "${AUTH_HEADER_ARGS[@]}")
+
+    debug_response "$response"
+
+    local vm_status=$(get_jq_data "$response" '.data.status')
+
+    if [[ "$vm_status" == "$target_status" ]]; then
+      log_debug "VM $vm_id reached status: $target_status"
+      return 0
+    fi
+
+    sleep "$interval"
+    elapsed=$((elapsed + interval))
+  done
+
+  bail "$EXIT_SYSTEM" "Timeout waiting for VM $vm_id to reach status '$target_status' (waited ${timeout_secs}s)."
+}
+
+scp_file() {
+  local source="$1"
+  local destination="$2"
+  local description="${3:-file transfer}"
+
+  log_info "Transferring $description..."
+  if ! scp "$source" "$destination"; then
+    bail "$EXIT_SYSTEM" "Failed to transfer $description."
+  fi
+  log_info "$description completed successfully."
+}

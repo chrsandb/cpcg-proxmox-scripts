@@ -112,14 +112,9 @@ init_curl_opts() {
 # Function to SCP the QCOW2 file
 scp_qcow2_image() {
   if $CPMNGT_COPY_IMAGE; then
-    echo "Transferring QCOW2 image to Proxmox server..."
-    if ! scp "$CPMNGT_QCOW2_IMAGE" "$PVE_USER@$PVE_HOST:$CPMNGT_IMAGE_PATH"; then
-      echo "Error: Failed to transfer QCOW2 file to Proxmox server."
-      exit 1
-    fi
-    echo "QCOW2 image transferred successfully."
+    scp_file "$CPMNGT_QCOW2_IMAGE" "$PVE_USER@$PVE_HOST:$CPMNGT_IMAGE_PATH" "QCOW2 image to Proxmox server"
   else
-    echo "Skipping QCOW2 file transfer as --copy-image was not specified."
+    log_info "Skipping QCOW2 file transfer as --copy-image was not specified."
   fi
 }
 
@@ -159,9 +154,9 @@ wait_for_scsi0_disk() {
 
     debug_response "$response"
 
-    local scsi0=$(echo "$response" | jq -r '.data.scsi0 // empty')
+    local scsi0=$(get_jq_data "$response" '.data.scsi0')
     if [[ -n "$scsi0" ]]; then
-      echo "scsi0 disk is available for VM $CPMNGT_TEMPLATE_ID."
+      log_info "scsi0 disk is available for VM $CPMNGT_TEMPLATE_ID."
       return 0
     fi
 
@@ -169,8 +164,7 @@ wait_for_scsi0_disk() {
     elapsed=$((elapsed + interval))
   done
 
-  echo "Error: Timeout waiting for scsi0 disk to be available for VM $CPMNGT_TEMPLATE_ID."
-  exit 1
+  bail "$EXIT_SYSTEM" "Timeout waiting for scsi0 disk to be available for VM $CPMNGT_TEMPLATE_ID."
 }
 
 # Function to import the QCOW2 image
@@ -182,7 +176,7 @@ import_qcow2_image() {
 
   debug_response "$response"
 
-  local upid=$(echo "$response" | jq -r '.data // empty')
+  local upid=$(get_jq_data "$response" '.data')
   check_api_error "$response" "import QCOW2 image"
 
   wait_for_task "$upid" "import_qcow2_image"

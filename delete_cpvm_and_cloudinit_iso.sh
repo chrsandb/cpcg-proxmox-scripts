@@ -97,43 +97,38 @@ prompt_for_password() {
   echo
 }
 
-# Function to check if the VM exists
 check_vm_exists() {
-  echo "Checking if VM $VM_ID exists..."
+  log_info "Checking if VM $VM_ID exists..."
   local response=$(curl_with_retries -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/current" \
     "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
 
-  local vm_status=$(echo "$response" | jq -r '.data.status // empty')
+  local vm_status=$(get_jq_data "$response" '.data.status')
   if [[ -z "$vm_status" || "$vm_status" == "null" ]]; then
-    echo "Error: VM $VM_ID does not exist."
-    exit 1
+    bail "$EXIT_API" "VM $VM_ID does not exist."
   fi
-  echo "VM $VM_ID exists with status: $vm_status."
+  log_info "VM $VM_ID exists with status: $vm_status."
 }
 
 # Function to retrieve the VM name
 get_vm_name() {
-  echo "Retrieving name for VM $VM_ID..."
   local response=$(curl_with_retries -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/config" \
     "${AUTH_HEADER_ARGS[@]}")
 
   debug_response "$response"
 
-  local vm_name=$(echo "$response" | jq -r '.data.name // empty')
-  if [[ -z "$vm_name" || "$vm_name" == "null" ]]; then
-    echo "Error: Unable to retrieve the name for VM $VM_ID."
-    exit 1
+  VM_NAME=$(get_jq_data "$response" '.data.name')
+  if [[ -z "$VM_NAME" || "$VM_NAME" == "null" ]]; then
+    bail "$EXIT_API" "Unable to retrieve the name for VM $VM_ID."
   fi
 
-  echo "VM $VM_ID has name: $vm_name."
-  VM_NAME="$vm_name"
+  log_info "VM $VM_ID has name: $VM_NAME."
 }
 
 # Function to hard stop a VM
 stop_vm() {
-  echo "Stopping VM $VM_ID..."
+  log_info "Stopping VM $VM_ID..."
   local response=$(curl_with_retries -X POST "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/stop" \
     "${AUTH_HEADER_ARGS[@]}")
 
@@ -141,19 +136,8 @@ stop_vm() {
 
   check_api_error "$response" "stop the VM"
 
-  echo "Waiting for VM $VM_ID to stop..."
-  while true; do
-    local status_response=$(curl_with_retries -X GET "$PROXMOX_API_URL/nodes/$NODE_NAME/qemu/$VM_ID/status/current" \
-      "${AUTH_HEADER_ARGS[@]}")
-    local vm_status=$(echo "$status_response" | jq -r '.data.status')
-
-    if [[ "$vm_status" == "stopped" ]]; then
-      echo "VM $VM_ID has stopped."
-      break
-    fi
-
-    sleep 2
-  done
+  wait_for_vm_status "$VM_ID" "stopped"
+  log_info "VM $VM_ID has stopped."
 }
 
 # Function to delete a VM

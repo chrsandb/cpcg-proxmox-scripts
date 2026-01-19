@@ -120,7 +120,7 @@ get_available_vm_id() {
 
     debug_response "$response"
 
-    local vm_id=$(echo "$response" | jq -r '.data')
+    local vm_id=$(get_jq_data "$response" '.data')
     if [[ -n "$vm_id" && "$vm_id" != "null" ]]; then
       VM_ID="$vm_id"
       return 0
@@ -195,17 +195,16 @@ resize_disk() {
 
   debug_response "$response"
 
-  local success=$(echo "$response" | jq -r '.data // empty')
+  local success=$(get_jq_data "$response" '.data')
   if [[ -z "$success" || "$success" == "null" ]]; then
-    echo "Error: Failed to resize the disk. Possible reasons:"
-    echo "  - Ensure the disk is in a resizable format (e.g., qcow2 or raw)."
-    echo "  - Verify the size parameter syntax (e.g., +80G)."
-    echo "  - Check Proxmox user permissions for resizing disks."
-    echo "Error details: $response"
-    exit 1
+    log_error "Failed to resize the disk. Possible reasons:"
+    log_error "  - Ensure the disk is in a resizable format (e.g., qcow2 or raw)."
+    log_error "  - Verify the size parameter syntax (e.g., +80G)."
+    log_error "  - Check Proxmox user permissions for resizing disks."
+    bail "$EXIT_API" "Error details: $response"
   fi
 
-  echo "Disk resized successfully to $CPVM_DISK_RESIZE."
+  log_info "Disk resized successfully to $CPVM_DISK_RESIZE."
 }
 
 # Function to attach the ISO to the VM
